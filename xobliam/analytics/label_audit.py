@@ -1,6 +1,8 @@
 """Label audit and optimization analysis."""
 
+import re
 from collections import defaultdict
+from datetime import datetime
 from itertools import combinations
 from typing import Any
 
@@ -594,28 +596,191 @@ def find_split_candidates(
     return sorted(candidates, key=lambda x: x["coherence_score"])
 
 
+def _generate_label_name(domain: str) -> str:
+    """
+    Generate a human-readable label name from a domain.
+
+    Examples:
+        afsaccounting.com → "AFS Accounting"
+        oig.ca.gov → "OIG"
+        calcareers.ca.gov → "CalCareers"
+        alerts.comcast.net → "Comcast Alerts"
+        billpay.bankofamerica.com → "BofA Payments"
+    """
+    # Known domain mappings for common patterns
+    DOMAIN_MAPPINGS = {
+        "bankofamerica": "BofA",
+        "wellsfargo": "Wells Fargo",
+        "capitalone": "Capital One",
+        "americanexpress": "Amex",
+        "chase": "Chase",
+        "citi": "Citi",
+        "usbank": "US Bank",
+        "fidelity": "Fidelity",
+        "vanguard": "Vanguard",
+        "schwab": "Schwab",
+        "amazon": "Amazon",
+        "google": "Google",
+        "microsoft": "Microsoft",
+        "apple": "Apple",
+        "facebook": "Facebook",
+        "linkedin": "LinkedIn",
+        "twitter": "Twitter",
+        "instagram": "Instagram",
+        "netflix": "Netflix",
+        "spotify": "Spotify",
+        "uber": "Uber",
+        "lyft": "Lyft",
+        "doordash": "DoorDash",
+        "grubhub": "Grubhub",
+        "airbnb": "Airbnb",
+        "dropbox": "Dropbox",
+        "slack": "Slack",
+        "zoom": "Zoom",
+        "github": "GitHub",
+        "gitlab": "GitLab",
+    }
+
+    # Known subdomain prefixes that indicate purpose
+    SUBDOMAIN_PURPOSES = {
+        "alerts": "Alerts",
+        "notifications": "Notifications",
+        "notify": "Notifications",
+        "billing": "Billing",
+        "billpay": "Payments",
+        "payments": "Payments",
+        "pay": "Payments",
+        "support": "Support",
+        "help": "Support",
+        "noreply": "",
+        "no-reply": "",
+        "info": "",
+        "mail": "",
+        "email": "",
+        "news": "News",
+        "newsletter": "Newsletter",
+        "updates": "Updates",
+        "account": "Account",
+        "security": "Security",
+        "orders": "Orders",
+        "shipping": "Shipping",
+        "receipts": "Receipts",
+    }
+
+    parts = domain.lower().split(".")
+
+    # Handle government domains (*.gov, *.ca.gov, etc.)
+    if domain.endswith(".gov"):
+        # For subdomains like oig.ca.gov, calcareers.ca.gov
+        # Use the first meaningful part
+        if len(parts) >= 3:
+            subdomain = parts[0]
+            # Check if it's an acronym (all consonants or short)
+            if len(subdomain) <= 4 or not any(c in subdomain for c in "aeiou"):
+                return subdomain.upper()
+            else:
+                return subdomain.title()
+        elif len(parts) >= 2:
+            return parts[0].upper()
+
+    # Handle .edu domains
+    if domain.endswith(".edu"):
+        if len(parts) >= 2:
+            return parts[-2].title()
+
+    # Handle .org domains
+    if domain.endswith(".org"):
+        if len(parts) >= 2:
+            org_name = parts[-2]
+            return org_name.title()
+
+    # For commercial domains, extract the main company name
+    # and optionally the subdomain purpose
+
+    # Find the main domain (second-to-last part before TLD)
+    if len(parts) >= 2:
+        # Handle multi-part TLDs like .co.uk, .com.au
+        if parts[-2] in ("co", "com", "net", "org") and len(parts) >= 3:
+            main_domain = parts[-3]
+            subdomain = parts[0] if len(parts) >= 4 else ""
+        else:
+            main_domain = parts[-2]
+            subdomain = parts[0] if len(parts) >= 3 else ""
+    else:
+        main_domain = parts[0]
+        subdomain = ""
+
+    # Look up known company names
+    company_name = DOMAIN_MAPPINGS.get(main_domain, None)
+
+    if not company_name:
+        # Try to make the domain name readable
+        # Split on common patterns (camelCase, numbers, etc.)
+        company_name = main_domain
+
+        # Handle compound names like "bankofamerica" → "Bank Of America"
+        # Simple heuristic: insert spaces before capital letters or common words
+        import re
+        # Try to split camelCase or compounds
+        company_name = re.sub(r'([a-z])([A-Z])', r'\1 \2', company_name)
+        company_name = re.sub(r'([a-z])(of|and|the)([A-Z])', r'\1 \2 \3', company_name, flags=re.IGNORECASE)
+
+        company_name = company_name.title()
+
+    # Add subdomain purpose if meaningful
+    if subdomain and subdomain != main_domain:
+        purpose = SUBDOMAIN_PURPOSES.get(subdomain, "")
+        if purpose:
+            return f"{company_name} {purpose}"
+
+    return company_name
+
+
+def _get_week_key(date_str: str) -> str:
+    """Extract year-week key from date string for grouping."""
+    from datetime import datetime
+
+    try:
+        # Parse ISO format date
+        if "T" in date_str:
+            dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+        else:
+            dt = datetime.fromisoformat(date_str)
+        return f"{dt.year}-W{dt.isocalendar()[1]:02d}"
+    except (ValueError, TypeError):
+        return ""
+
+
 def suggest_new_labels(
     messages: list[dict[str, Any]],
-    min_cluster_size: int = 5,
+    min_emails: int = 10,
+    min_weeks: int = 3,
     min_read_rate: float = 0.30,
 ) -> list[dict[str, Any]]:
     """
     Suggest new labels for unlabeled emails worth organizing.
 
-    Only suggests labels for emails that:
-    - Have high engagement (read rate > 30%)
-    - Don't appear to be marketing (no unsubscribe signals)
+    Only suggests labels for senders with:
+    - Consistent activity over time (emails in at least min_weeks different weeks)
+    - High engagement (read rate > 30%)
+    - No marketing signals (no unsubscribe indicators)
+    - Sufficient volume (at least min_emails)
+
+    This filters out one-time purchases and transient activity.
 
     Args:
         messages: List of message dictionaries.
-        min_cluster_size: Minimum emails from same domain to suggest.
+        min_emails: Minimum emails required to suggest a label.
+        min_weeks: Minimum number of different weeks with activity.
         min_read_rate: Minimum read rate to consider (0.0 to 1.0).
 
     Returns:
-        List of label suggestions for engaged, non-marketing emails.
+        List of label suggestions for engaged, consistent correspondence.
     """
-    # Find unlabeled messages
-    unlabeled_by_domain: dict[str, list] = defaultdict(list)
+    # Group unlabeled messages by domain, tracking weeks
+    unlabeled_by_domain: dict[str, dict] = defaultdict(
+        lambda: {"messages": [], "weeks": set()}
+    )
 
     for msg in messages:
         labels = msg.get("labels", [])
@@ -631,29 +796,46 @@ def suggest_new_labels(
 
         sender = msg.get("sender", "")
         domain = _extract_domain(sender)
-        if domain:
-            unlabeled_by_domain[domain].append(msg)
+        if not domain:
+            continue
+
+        # Track the message and its week
+        unlabeled_by_domain[domain]["messages"].append(msg)
+
+        date_str = msg.get("date", "")
+        week_key = _get_week_key(date_str)
+        if week_key:
+            unlabeled_by_domain[domain]["weeks"].add(week_key)
 
     suggestions = []
-    for domain, msgs in unlabeled_by_domain.items():
-        if len(msgs) < min_cluster_size:
+    for domain, data in unlabeled_by_domain.items():
+        msgs = data["messages"]
+        weeks = data["weeks"]
+
+        # Filter: minimum email count
+        if len(msgs) < min_emails:
+            continue
+
+        # Filter: consistent activity across multiple weeks
+        if len(weeks) < min_weeks:
             continue
 
         # Calculate read rate for this cluster
         read_count = sum(1 for m in msgs if not m.get("is_unread", False))
         read_rate = read_count / len(msgs)
 
-        # Skip low engagement clusters
+        # Filter: minimum engagement
         if read_rate < min_read_rate:
             continue
 
-        # Generate label name
-        label_name = domain.split(".")[0].title()
+        # Generate human-readable label name
+        label_name = _generate_label_name(domain)
 
         suggestions.append({
             "suggested_label": label_name,
             "domain": domain,
             "message_count": len(msgs),
+            "weeks_active": len(weeks),
             "read_rate": round(read_rate * 100, 1),
             "sample_subjects": [m.get("subject", "")[:60] for m in msgs[:3]],
         })
