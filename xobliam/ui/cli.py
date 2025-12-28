@@ -166,8 +166,13 @@ def print_deletion_summary(summary: dict[str, Any]) -> None:
     console.print(f"\nTotal deletable: [green]{summary.get('deletable', 0)}[/green]")
 
 
-def print_label_stats(stats: dict[str, Any], limit: int = 15) -> None:
-    """Print label statistics."""
+def print_label_stats(stats: dict[str, Any], show_system: bool = False) -> None:
+    """Print label statistics.
+
+    Args:
+        stats: Label statistics from get_label_stats.
+        show_system: If True, include system labels. Default False to reduce noise.
+    """
     # Print summary
     console.print(f"Total messages: [green]{stats['total_messages']:,}[/green]")
     console.print(
@@ -176,23 +181,52 @@ def print_label_stats(stats: dict[str, Any], limit: int = 15) -> None:
     )
     console.print()
 
+    # Filter labels
+    all_labels = stats.get("labels", [])
+    if show_system:
+        labels = all_labels
+    else:
+        labels = [l for l in all_labels if not l.get("is_system", False)]
+
+    if not labels:
+        console.print("[dim]No user labels found.[/dim]")
+        return
+
     # Print label table
     table = Table(title="Label Statistics")
-    table.add_column("Label", style="cyan", max_width=30)
+    table.add_column("Label", style="cyan", max_width=40)
     table.add_column("Count", justify="right", style="green")
     table.add_column("%", justify="right", style="dim")
     table.add_column("Read Rate", justify="right", style="yellow")
 
-    labels = stats.get("labels", [])
-    for label in labels[:limit]:
-        table.add_row(
-            label.get("label", "")[:30],
-            str(label.get("count", 0)),
-            f"{label.get('percentage', 0):.1f}%",
-            f"{label.get('read_rate', 0):.1f}%",
-        )
+    # Show all labels, highlight abandoned ones (0 messages)
+    for label in labels:
+        count = label.get("count", 0)
+        label_name = label.get("label", "")[:40]
+
+        # Highlight abandoned labels
+        if count == 0:
+            label_display = f"[dim]{label_name}[/dim] [red](abandoned)[/red]"
+            count_display = "[dim]0[/dim]"
+            pct_display = "[dim]0.0%[/dim]"
+            rate_display = "[dim]—[/dim]"
+        else:
+            label_display = label_name
+            count_display = str(count)
+            pct_display = f"{label.get('percentage', 0):.1f}%"
+            rate_display = f"{label.get('read_rate', 0):.1f}%"
+
+        table.add_row(label_display, count_display, pct_display, rate_display)
 
     console.print(table)
+
+    # Summary of abandoned labels
+    abandoned = [l for l in labels if l.get("count", 0) == 0]
+    if abandoned:
+        console.print(
+            f"\n[yellow]Found {len(abandoned)} abandoned label(s) with 0 messages "
+            f"in this timeframe.[/yellow]"
+        )
 
 
 def print_category_breakdown(stats: dict[str, dict[str, Any]]) -> None:

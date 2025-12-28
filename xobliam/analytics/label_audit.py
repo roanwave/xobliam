@@ -306,12 +306,17 @@ def _find_common_words(subjects: list[str], min_occurrence: int = 3) -> list[str
     ]
 
 
-def get_label_stats(messages: list[dict[str, Any]]) -> dict[str, Any]:
+def get_label_stats(
+    messages: list[dict[str, Any]],
+    all_labels: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """
     Get statistics for each label including usage counts and percentages.
 
     Args:
         messages: List of message dictionaries.
+        all_labels: Optional list of all labels from cache (to include abandoned labels
+                    with 0 messages in the timeframe).
 
     Returns:
         Dictionary with:
@@ -329,6 +334,7 @@ def get_label_stats(messages: list[dict[str, Any]]) -> dict[str, Any]:
         "UNREAD",
         "STARRED",
         "IMPORTANT",
+        "CHAT",
         "CATEGORY_PERSONAL",
         "CATEGORY_SOCIAL",
         "CATEGORY_PROMOTIONS",
@@ -339,6 +345,22 @@ def get_label_stats(messages: list[dict[str, Any]]) -> dict[str, Any]:
     label_data: dict[str, dict] = defaultdict(
         lambda: {"count": 0, "unread": 0, "senders": set()}
     )
+
+    # Pre-populate with all known labels (including those with 0 messages)
+    # This ensures abandoned labels appear in the output
+    if all_labels:
+        for label_info in all_labels:
+            label_name = label_info.get("name", "")
+            label_type = label_info.get("type", "")
+
+            # Skip system labels (by type or by name)
+            if label_type == "system":
+                continue
+            if label_name in system_labels or label_name.startswith("CATEGORY_"):
+                continue
+            if label_name:
+                # Touch it to ensure it exists in defaultdict
+                _ = label_data[label_name]
 
     total_messages = len(messages)
     unlabeled_count = 0
@@ -377,7 +399,7 @@ def get_label_stats(messages: list[dict[str, Any]]) -> dict[str, Any]:
                 if count > 0
                 else 0.0,
                 "unique_senders": unique_senders,
-                "is_system": label in system_labels,
+                "is_system": label in system_labels or label.startswith("CATEGORY_"),
             }
         )
 

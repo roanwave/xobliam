@@ -269,7 +269,8 @@ def delete_cmd(dry_run: bool, execute: bool, min_score: int, confirm: bool, limi
 
 @cli.command()
 @click.option("--days", default=90, help="Number of days to analyze")
-def labels(days: int):
+@click.option("--show-system", is_flag=True, help="Include system labels in output")
+def labels(days: int, show_system: bool):
     """Analyze labels and show optimization suggestions."""
     print_header("Label Analysis")
 
@@ -280,11 +281,14 @@ def labels(days: int):
         print_error("No messages found. Run 'xobliam fetch' first.")
         return
 
+    # Get all labels from cache (including abandoned ones with 0 messages)
+    all_labels = cache.get_cached_labels()
+
     print_info(f"Analyzing {len(messages)} messages...\n")
 
-    # Label stats
-    label_stats = get_label_stats(messages)
-    print_label_stats(label_stats)
+    # Label stats (pass all_labels to include abandoned labels)
+    label_stats = get_label_stats(messages, all_labels=all_labels)
+    print_label_stats(label_stats, show_system=show_system)
     console.print()
 
     # Redundant labels
