@@ -285,3 +285,78 @@ def apply_label_to_messages(
         "total_messages": len(message_ids),
         "errors": errors if errors else None,
     }
+
+
+def create_filter_for_senders(
+    senders: list[str],
+    label_id: str,
+    service: Resource | None = None,
+) -> dict[str, Any]:
+    """
+    Create a Gmail filter to auto-label future emails from specified senders.
+
+    Args:
+        senders: List of sender email addresses.
+        label_id: ID of the label to apply.
+        service: Gmail API service.
+
+    Returns:
+        Dictionary with filter creation results.
+    """
+    if service is None:
+        service = get_gmail_service()
+
+    if not senders:
+        return {
+            "success": False,
+            "error": "No senders provided",
+        }
+
+    # Build filter criteria: from:sender1 OR from:sender2 OR ...
+    # Gmail filter uses "from:" query syntax
+    from_queries = [f"from:{sender}" for sender in senders]
+
+    # Gmail has a limit on filter criteria length, so we may need to chunk
+    # For now, handle up to ~50 senders which should be under the limit
+    if len(senders) > 50:
+        return {
+            "success": False,
+            "error": f"Too many senders ({len(senders)}). Maximum 50 senders per filter.",
+        }
+
+    filter_criteria = " OR ".join(from_queries)
+
+    # Build the filter body
+    filter_body = {
+        "criteria": {
+            "from": " ".join(senders),  # Gmail API uses space-separated for OR
+        },
+        "action": {
+            "addLabelIds": [label_id],
+        },
+    }
+
+    try:
+        result = (
+            service.users()
+            .settings()
+            .filters()
+            .create(userId="me", body=filter_body)
+            .execute()
+        )
+        return {
+            "success": True,
+            "filter_id": result.get("id"),
+            "senders_count": len(senders),
+        }
+    except HttpError as e:
+        error_msg = str(e)
+        if "Filter already exists" in error_msg:
+            return {
+                "success": False,
+                "error": "A similar filter already exists",
+            }
+        return {
+            "success": False,
+            "error": error_msg,
+        }

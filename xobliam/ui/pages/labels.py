@@ -20,6 +20,7 @@ from xobliam.analytics import (
 from xobliam.fetcher import (
     MessageCache,
     apply_label_to_messages,
+    create_filter_for_senders,
     create_label,
     get_label_id_by_name,
     merge_labels,
@@ -883,16 +884,26 @@ def render_label_manager(messages: list, cache: MessageCache):
         label_id = st.session_state.get("search_label_id", selected_label_id)
 
         if selected_emails > 0:
+            # Option to create Gmail filter
+            create_filter = st.checkbox(
+                "Also create Gmail filter for future emails",
+                value=True,
+                key="create_filter_checkbox",
+                help="Automatically label future emails from these senders",
+            )
+
             if st.button(
                 f"Apply label '{label_name}' to {selected_emails} emails",
                 type="primary",
                 key="apply_label_btn",
             ):
-                # Collect message IDs to label
+                # Collect message IDs and senders to label
                 message_ids = []
+                selected_sender_emails = []
                 for sender, msgs in matching_by_sender.items():
                     if st.session_state.selected_senders.get(sender, False):
                         message_ids.extend([m["message_id"] for m in msgs])
+                        selected_sender_emails.append(sender)
 
                 # Apply label with progress
                 with st.spinner(f"Applying label '{label_name}'..."):
@@ -916,6 +927,25 @@ def render_label_manager(messages: list, cache: MessageCache):
                     st.success(
                         f"Applied label '{label_name}' to {result['messages_labeled']} emails!"
                     )
+
+                    # Create Gmail filter if requested
+                    if create_filter and selected_sender_emails:
+                        with st.spinner("Creating Gmail filter..."):
+                            filter_result = create_filter_for_senders(
+                                senders=selected_sender_emails,
+                                label_id=label_id,
+                            )
+
+                        if filter_result["success"]:
+                            st.success(
+                                f"Created filter: Future emails from {filter_result['senders_count']} "
+                                f"senders will automatically be labeled '{label_name}'"
+                            )
+                        else:
+                            st.warning(
+                                f"Could not create filter: {filter_result.get('error', 'Unknown error')}"
+                            )
+
                     st.info("Refresh data in Settings to see the updated labels.")
                     # Clear search results
                     del st.session_state.search_results

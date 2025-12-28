@@ -32,6 +32,7 @@ All notable changes to xobliam will be documented in this file.
 - Optional subject keyword filtering
 - Preview matching emails grouped by sender with checkboxes to include/exclude
 - Apply label to selected emails with progress tracking
+- **Gmail filter creation**: Optionally create a filter so future emails from selected senders are auto-labeled
 - Makes xobliam an inbox organization tool, not just analytics
 
 ### Changed
