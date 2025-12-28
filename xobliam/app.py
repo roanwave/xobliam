@@ -43,7 +43,7 @@ def main():
     # Quick actions
     st.sidebar.subheader("Quick Actions")
 
-    if st.sidebar.button("Refresh Data", use_container_width=True):
+    if st.sidebar.button("Refresh Data", width="stretch"):
         with st.spinner("Fetching data..."):
             try:
                 from xobliam.fetcher import fetch_messages, fetch_labels

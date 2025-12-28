@@ -82,7 +82,7 @@ def render():
             labels={"count": "Emails", "category": "", "read_rate": "Read Rate (%)"},
         )
         fig.update_layout(height=400)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     # Detailed breakdown by category
     st.subheader("Category Details")
@@ -162,7 +162,7 @@ def render():
                 hole=0.4,
             )
             fig.update_layout(height=350)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
     # Drill-down by category
     st.subheader("Explore Category")
@@ -185,7 +185,7 @@ def render():
 
             st.dataframe(
                 sender_df,
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 column_config={
                     "Read Rate (%)": st.column_config.ProgressColumn(

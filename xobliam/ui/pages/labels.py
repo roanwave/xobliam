@@ -74,7 +74,7 @@ def render_overview(messages: list):
             df = pd.DataFrame(system_labels[:20])
             df = df[["label", "count", "read_rate"]]
             df.columns = ["Label", "Emails", "Read Rate (%)"]
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df, width="stretch", hide_index=True)
         return
 
     # Treemap of labels
@@ -89,7 +89,7 @@ def render_overview(messages: list):
         color_continuous_midpoint=50,
     )
     fig.update_layout(height=500)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # Table view
     st.subheader("Label Statistics")
@@ -100,7 +100,7 @@ def render_overview(messages: list):
 
     st.dataframe(
         table_df,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         column_config={
             "Read Rate (%)": st.column_config.ProgressColumn(

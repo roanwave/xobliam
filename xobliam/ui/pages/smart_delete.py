@@ -141,7 +141,7 @@ def render_candidates(messages: list):
 
     st.dataframe(
         df[["Score", "Tier", "From", "Subject", "Date"]],
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         height=400,
     )
@@ -258,7 +258,7 @@ def render_execution(messages: list, cache: MessageCache):
         for c in preview
     ])
 
-    st.dataframe(preview_df, use_container_width=True, hide_index=True)
+    st.dataframe(preview_df, width="stretch", hide_index=True)
 
     if len(candidates) > 10:
         st.caption(f"...and {len(candidates) - 10} more")
@@ -269,7 +269,7 @@ def render_execution(messages: list, cache: MessageCache):
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("Dry Run", use_container_width=True):
+        if st.button("Dry Run", width="stretch"):
             message_ids = [c["message_id"] for c in candidates[:max_delete]]
 
             with st.spinner("Simulating deletion..."):
@@ -289,7 +289,7 @@ def render_execution(messages: list, cache: MessageCache):
 
         if st.button(
             "Delete Emails",
-            use_container_width=True,
+            width="stretch",
             type="primary",
             disabled=not confirm,
         ):

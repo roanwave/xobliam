@@ -70,7 +70,7 @@ def render():
             hole=0.4,
         )
         fig.update_layout(showlegend=True, height=300)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
         st.caption(
             f"You've read {open_rate['read']:,} of {open_rate['total']:,} emails"
@@ -96,7 +96,7 @@ def render():
             coloraxis_showscale=False,
             height=300,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     st.divider()
 
@@ -112,7 +112,7 @@ def render():
         df.columns = ["Sender", "Emails", "Read Rate (%)"]
         st.dataframe(
             df,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             column_config={
                 "Read Rate (%)": st.column_config.ProgressColumn(

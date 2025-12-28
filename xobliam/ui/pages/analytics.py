@@ -76,7 +76,7 @@ def render_time_patterns(messages: list):
         height=400,
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # Peak info
     col1, col2, col3 = st.columns(3)
@@ -110,7 +110,7 @@ def render_time_patterns(messages: list):
         coloraxis_showscale=False,
         height=300,
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def render_sender_analysis(messages: list):
@@ -131,7 +131,7 @@ def render_sender_analysis(messages: list):
 
         st.dataframe(
             df,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             height=400,
             column_config={
@@ -162,7 +162,7 @@ def render_sender_analysis(messages: list):
             color_continuous_scale="RdYlGn",
         )
         fig.update_layout(height=500, yaxis=dict(autorange="reversed"))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
 
 def render_daily_distribution(messages: list):
@@ -186,7 +186,7 @@ def render_daily_distribution(messages: list):
             yaxis_title="Emails",
             height=400,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     # Day of week breakdown
     st.subheader("Weekly Pattern")
@@ -211,7 +211,7 @@ def render_daily_distribution(messages: list):
         busiest_df = busiest_df[["date", "day_name", "count"]]
         busiest_df.columns = ["Date", "Day", "Emails"]
 
-        st.dataframe(busiest_df, use_container_width=True, hide_index=True)
+        st.dataframe(busiest_df, width="stretch", hide_index=True)
 
 
 def render_engagement(messages: list):
@@ -261,7 +261,7 @@ def render_engagement(messages: list):
 
         st.dataframe(
             df,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             column_config={
                 "Open Rate (%)": st.column_config.ProgressColumn(
@@ -286,6 +286,6 @@ def render_engagement(messages: list):
         le_df = le_df[["sender", "total", "open_rate"]]
         le_df.columns = ["Sender", "Emails", "Open Rate (%)"]
 
-        st.dataframe(le_df, use_container_width=True, hide_index=True)
+        st.dataframe(le_df, width="stretch", hide_index=True)
     else:
         st.info("No senders with consistently low engagement found.")
