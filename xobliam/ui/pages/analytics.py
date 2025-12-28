@@ -1,0 +1,291 @@
+"""Analytics page for Streamlit UI."""
+
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+
+from xobliam.analytics import (
+    analyze_time_patterns,
+    calculate_open_rate,
+    get_busiest_dates,
+    get_calendar_distribution,
+    get_day_of_week_distribution,
+    get_frequent_senders,
+    get_sender_domains,
+    get_sender_engagement,
+)
+from xobliam.fetcher import MessageCache
+
+
+def render():
+    """Render the analytics page."""
+    st.title("Analytics")
+    st.caption("Detailed email patterns and statistics")
+
+    # Load data
+    cache = MessageCache()
+    messages = cache.get_cached_messages(since_days=90)
+
+    if not messages:
+        st.warning("No email data available. Click 'Refresh Data' in the sidebar.")
+        return
+
+    # Tabs for different analytics
+    tab1, tab2, tab3, tab4 = st.tabs(
+        ["Time Patterns", "Sender Analysis", "Daily Distribution", "Engagement"]
+    )
+
+    with tab1:
+        render_time_patterns(messages)
+
+    with tab2:
+        render_sender_analysis(messages)
+
+    with tab3:
+        render_daily_distribution(messages)
+
+    with tab4:
+        render_engagement(messages)
+
+
+def render_time_patterns(messages: list):
+    """Render time pattern analysis."""
+    st.subheader("Email Activity Heatmap")
+
+    patterns = analyze_time_patterns(messages)
+    matrix = patterns["matrix"]
+    day_names = patterns["day_names"]
+
+    # Create heatmap
+    fig = go.Figure(
+        data=go.Heatmap(
+            z=matrix,
+            x=list(range(24)),
+            y=day_names,
+            colorscale="Blues",
+            hoverongaps=False,
+            hovertemplate="Day: %{y}<br>Hour: %{x}:00<br>Emails: %{z}<extra></extra>",
+        )
+    )
+
+    fig.update_layout(
+        xaxis_title="Hour of Day",
+        yaxis_title="",
+        xaxis=dict(tickmode="linear", tick0=0, dtick=2),
+        height=400,
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Peak info
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric("Peak Day", patterns["peak_day"])
+
+    with col2:
+        st.metric("Peak Hour", f"{patterns['peak_hour']:02d}:00")
+
+    with col3:
+        st.metric("Peak Count", patterns["peak_count"])
+
+    # Hourly totals
+    st.subheader("Hourly Distribution")
+
+    hourly_data = pd.DataFrame(
+        {"hour": list(range(24)), "count": patterns["hour_totals"]}
+    )
+
+    fig = px.bar(
+        hourly_data,
+        x="hour",
+        y="count",
+        color="count",
+        color_continuous_scale="Blues",
+    )
+    fig.update_layout(
+        xaxis_title="Hour",
+        yaxis_title="Emails",
+        coloraxis_showscale=False,
+        height=300,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def render_sender_analysis(messages: list):
+    """Render sender analysis."""
+    st.subheader("Top Senders by Volume")
+
+    # Controls
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        top_n = st.selectbox("Show top", [10, 20, 50, 100], index=0)
+
+    senders = get_frequent_senders(messages, top_n=top_n)
+
+    if senders:
+        df = pd.DataFrame(senders)
+        df = df[["sender", "count", "read_rate", "has_attachments_count"]]
+        df.columns = ["Sender", "Emails", "Read Rate (%)", "With Attachments"]
+
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            height=400,
+            column_config={
+                "Read Rate (%)": st.column_config.ProgressColumn(
+                    min_value=0,
+                    max_value=100,
+                    format="%.1f%%",
+                ),
+            },
+        )
+
+    # Domain analysis
+    st.subheader("Top Domains")
+
+    domains = get_sender_domains(messages)[:20]
+
+    if domains:
+        domain_df = pd.DataFrame(domains)
+        domain_df = domain_df[["domain", "count", "unique_senders", "read_rate"]]
+        domain_df.columns = ["Domain", "Emails", "Unique Senders", "Read Rate (%)"]
+
+        fig = px.bar(
+            domain_df.head(15),
+            x="Emails",
+            y="Domain",
+            orientation="h",
+            color="Read Rate (%)",
+            color_continuous_scale="RdYlGn",
+        )
+        fig.update_layout(height=500, yaxis=dict(autorange="reversed"))
+        st.plotly_chart(fig, use_container_width=True)
+
+
+def render_daily_distribution(messages: list):
+    """Render daily distribution analysis."""
+    st.subheader("Emails by Date")
+
+    calendar = get_calendar_distribution(messages)
+
+    if calendar:
+        df = pd.DataFrame(calendar)
+        df["date"] = pd.to_datetime(df["date"])
+
+        fig = px.line(
+            df,
+            x="date",
+            y="count",
+            markers=True,
+        )
+        fig.update_layout(
+            xaxis_title="Date",
+            yaxis_title="Emails",
+            height=400,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    # Day of week breakdown
+    st.subheader("Weekly Pattern")
+
+    dow = get_day_of_week_distribution(messages)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.metric("Weekday Average", f"{dow['weekday_avg']:.1f} emails/day")
+
+    with col2:
+        st.metric("Weekend Average", f"{dow['weekend_avg']:.1f} emails/day")
+
+    # Busiest dates
+    st.subheader("Busiest Days")
+
+    busiest = get_busiest_dates(messages, top_n=10)
+
+    if busiest:
+        busiest_df = pd.DataFrame(busiest)
+        busiest_df = busiest_df[["date", "day_name", "count"]]
+        busiest_df.columns = ["Date", "Day", "Emails"]
+
+        st.dataframe(busiest_df, use_container_width=True, hide_index=True)
+
+
+def render_engagement(messages: list):
+    """Render engagement analysis."""
+    st.subheader("Overall Engagement")
+
+    open_rate = calculate_open_rate(messages)
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric("Total Emails", f"{open_rate['total']:,}")
+
+    with col2:
+        st.metric("Read", f"{open_rate['read']:,}")
+
+    with col3:
+        st.metric("Unread", f"{open_rate['unread']:,}")
+
+    # Engagement by sender
+    st.subheader("Sender Engagement")
+
+    # Filter options
+    col1, col2 = st.columns(2)
+
+    with col1:
+        min_emails = st.slider("Minimum emails from sender", 1, 50, 5)
+
+    with col2:
+        sort_by = st.selectbox("Sort by", ["Volume", "Open Rate (High)", "Open Rate (Low)"])
+
+    engagement = get_sender_engagement(messages)
+
+    # Filter
+    engagement = [s for s in engagement if s["total"] >= min_emails]
+
+    # Sort
+    if sort_by == "Open Rate (High)":
+        engagement = sorted(engagement, key=lambda x: x["open_rate"], reverse=True)
+    elif sort_by == "Open Rate (Low)":
+        engagement = sorted(engagement, key=lambda x: x["open_rate"])
+
+    if engagement:
+        df = pd.DataFrame(engagement[:30])
+        df = df[["sender", "total", "read", "unread", "open_rate"]]
+        df.columns = ["Sender", "Total", "Read", "Unread", "Open Rate (%)"]
+
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Open Rate (%)": st.column_config.ProgressColumn(
+                    min_value=0,
+                    max_value=100,
+                    format="%.1f%%",
+                ),
+            },
+        )
+
+    # Low engagement senders (candidates for unsubscribe)
+    st.subheader("Low Engagement Senders")
+    st.caption("Senders with low open rates - consider unsubscribing")
+
+    low_engagement = [
+        s for s in get_sender_engagement(messages)
+        if s["total"] >= 5 and s["open_rate"] < 20
+    ]
+
+    if low_engagement:
+        le_df = pd.DataFrame(low_engagement[:20])
+        le_df = le_df[["sender", "total", "open_rate"]]
+        le_df.columns = ["Sender", "Emails", "Open Rate (%)"]
+
+        st.dataframe(le_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No senders with consistently low engagement found.")
