@@ -15,6 +15,7 @@ from xobliam.analytics import (
     get_label_health_summary,
     get_label_sender_breakdown,
     get_label_stats,
+    get_suggestion_summary,
     suggest_new_labels,
 )
 from xobliam.fetcher import (
@@ -45,7 +46,7 @@ def render():
     all_cached_labels = cache.get_cached_labels()
 
     # Tabs
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "Health Summary",
         "All Labels",
         "Label Details",
@@ -53,6 +54,7 @@ def render():
         "Engagement",
         "Overlap & Merge",
         "Label Manager",
+        "Suggestions",
     ])
 
     with tab1:
@@ -75,6 +77,9 @@ def render():
 
     with tab7:
         render_label_manager(messages, cache)
+
+    with tab8:
+        render_label_suggestions(messages, cache)
 
 
 def render_health_summary(messages: list, all_cached_labels: list):
@@ -955,3 +960,211 @@ def render_label_manager(messages: list, cache: MessageCache):
                     st.error(f"Failed to apply label: {result.get('errors', 'Unknown error')}")
         else:
             st.info("Select at least one sender to apply the label.")
+
+
+def render_label_suggestions(messages: list, cache: MessageCache):
+    """Render smart label suggestions for unlabeled emails."""
+    st.subheader("Smart Label Suggestions")
+    st.caption(
+        "Automatically suggest existing labels for unlabeled emails based on sender "
+        "patterns, domains, and subject keywords from your labeled emails."
+    )
+
+    # Get suggestions summary
+    with st.spinner("Analyzing email patterns..."):
+        summary = get_suggestion_summary(messages, min_score=35)
+
+    if summary["total_suggestions"] == 0:
+        st.info(
+            "No label suggestions found. This can happen if:\n"
+            "- You have few unlabeled emails\n"
+            "- Your labeled emails don't have clear sender patterns\n"
+            "- Unlabeled emails don't match your existing labels"
+        )
+        return
+
+    # Summary metrics
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.metric("Emails with Suggestions", summary["total_suggestions"])
+
+    with col2:
+        st.metric("Labels Matched", summary["label_count"])
+
+    st.divider()
+
+    # Initialize session state for selections
+    if "suggestion_selections" not in st.session_state:
+        st.session_state.suggestion_selections = {}
+
+    # Display suggestions by label
+    for label_name, label_data in summary["labels"].items():
+        with st.expander(
+            f"**{label_name}** - {label_data['total_matches']} emails from "
+            f"{label_data['unique_senders']} senders",
+            expanded=True if label_data["total_matches"] <= 20 else False,
+        ):
+            # Initialize selections for this label
+            if label_name not in st.session_state.suggestion_selections:
+                st.session_state.suggestion_selections[label_name] = {
+                    "senders": {},
+                    "select_all": True,
+                }
+
+            # Select all checkbox for this label
+            select_all = st.checkbox(
+                "Select all senders",
+                value=st.session_state.suggestion_selections[label_name].get("select_all", True),
+                key=f"select_all_{label_name}",
+            )
+            st.session_state.suggestion_selections[label_name]["select_all"] = select_all
+
+            st.divider()
+
+            # Display senders with checkboxes
+            selected_count = 0
+            selected_emails = 0
+            selected_message_ids = []
+
+            for sender_info in label_data["senders"]:
+                sender = sender_info["sender"]
+                count = sender_info["count"]
+                reasons = sender_info.get("reasons", [])
+                message_ids = sender_info.get("message_ids", [])
+
+                # Initialize sender selection based on select_all
+                if sender not in st.session_state.suggestion_selections[label_name]["senders"]:
+                    st.session_state.suggestion_selections[label_name]["senders"][sender] = select_all
+
+                # Override with select_all if it was just changed
+                if f"select_all_{label_name}" in st.session_state:
+                    st.session_state.suggestion_selections[label_name]["senders"][sender] = select_all
+
+                is_selected = st.checkbox(
+                    f"{sender[:50]} ({count} emails)",
+                    value=st.session_state.suggestion_selections[label_name]["senders"].get(sender, True),
+                    key=f"sender_{label_name}_{sender}",
+                    help=", ".join(reasons) if reasons else None,
+                )
+                st.session_state.suggestion_selections[label_name]["senders"][sender] = is_selected
+
+                if is_selected:
+                    selected_count += 1
+                    selected_emails += count
+                    selected_message_ids.extend(message_ids)
+
+            st.divider()
+
+            # Apply button for this label
+            if selected_emails > 0:
+                label_id = get_label_id_by_name(label_name, cache=cache)
+
+                if not label_id:
+                    st.warning(f"Could not find label ID for '{label_name}'. Try refreshing data.")
+                else:
+                    if st.button(
+                        f"Apply '{label_name}' to {selected_emails} emails",
+                        type="primary",
+                        key=f"apply_suggestion_{label_name}",
+                    ):
+                        with st.spinner(f"Applying label '{label_name}'..."):
+                            progress_bar = st.progress(0)
+                            status_text = st.empty()
+
+                            def update_progress(current, total):
+                                progress_bar.progress(min(1.0, current / total))
+                                status_text.text(f"Labeling {current}/{total} emails...")
+
+                            result = apply_label_to_messages(
+                                message_ids=selected_message_ids,
+                                label_id=label_id,
+                                progress_callback=update_progress,
+                            )
+
+                            progress_bar.empty()
+                            status_text.empty()
+
+                        if result["success"]:
+                            st.success(
+                                f"Applied label '{label_name}' to {result['messages_labeled']} emails!"
+                            )
+                            # Clear selections for this label
+                            if label_name in st.session_state.suggestion_selections:
+                                del st.session_state.suggestion_selections[label_name]
+                            st.info("Refresh data in Settings to see updated labels, then revisit this tab.")
+                        else:
+                            st.error(f"Failed: {result.get('errors', 'Unknown error')}")
+            else:
+                st.info("Select at least one sender to apply this label.")
+
+    st.divider()
+
+    # Bulk apply all suggestions button
+    st.subheader("Bulk Apply All")
+    st.caption("Apply all selected suggestions at once.")
+
+    # Count total selected across all labels
+    total_selected = 0
+    for label_name, label_data in summary["labels"].items():
+        if label_name in st.session_state.suggestion_selections:
+            for sender_info in label_data["senders"]:
+                sender = sender_info["sender"]
+                if st.session_state.suggestion_selections[label_name]["senders"].get(sender, True):
+                    total_selected += sender_info["count"]
+
+    if total_selected > 0:
+        if st.button(
+            f"Apply All Selected ({total_selected} emails across {summary['label_count']} labels)",
+            type="primary",
+            key="apply_all_suggestions",
+        ):
+            success_count = 0
+            error_count = 0
+
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            label_list = list(summary["labels"].items())
+            for i, (label_name, label_data) in enumerate(label_list):
+                status_text.text(f"Processing label '{label_name}'...")
+
+                label_id = get_label_id_by_name(label_name, cache=cache)
+                if not label_id:
+                    error_count += 1
+                    continue
+
+                # Collect selected message IDs for this label
+                message_ids = []
+                for sender_info in label_data["senders"]:
+                    sender = sender_info["sender"]
+                    if (
+                        label_name in st.session_state.suggestion_selections
+                        and st.session_state.suggestion_selections[label_name]["senders"].get(sender, True)
+                    ):
+                        message_ids.extend(sender_info.get("message_ids", []))
+
+                if message_ids:
+                    result = apply_label_to_messages(
+                        message_ids=message_ids,
+                        label_id=label_id,
+                    )
+                    if result["success"]:
+                        success_count += result["messages_labeled"]
+                    else:
+                        error_count += 1
+
+                progress_bar.progress((i + 1) / len(label_list))
+
+            progress_bar.empty()
+            status_text.empty()
+
+            if success_count > 0:
+                st.success(f"Applied labels to {success_count} emails!")
+                # Clear all selections
+                st.session_state.suggestion_selections = {}
+                st.info("Refresh data in Settings to see updated labels.")
+            if error_count > 0:
+                st.warning(f"{error_count} label(s) had errors during application.")
+    else:
+        st.info("Select some suggestions above to enable bulk apply.")

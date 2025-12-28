@@ -2,6 +2,29 @@
 
 All notable changes to xobliam will be documented in this file.
 
+## [1.2.0] - 2024-12-28
+
+### Added
+
+**Date/Deadline Extractor**
+- Scans unlabeled emails for future dates (sales, expirations, events, appointments)
+- Extracts promo codes found near dates
+- Shows dates on Dashboard in "Upcoming Dates & Deadlines" section
+- Supports patterns: MM/DD, "Month DD", "through X", "expires X", "by X"
+- Context extraction showing why the date matters
+
+**Smart Label Suggester**
+- New "Suggestions" tab in Labels page
+- Analyzes labeled emails to build sender/keyword profiles per label
+- Suggests existing labels for unlabeled emails based on similarity matching
+- Scoring system: sender email match (40pts), domain match (25pts), keyword overlap (20pts)
+- Apply suggestions individually or bulk apply all at once
+- Select/deselect senders with checkboxes before applying
+
+### Changed
+- Labels page now has 8 tabs (added Suggestions)
+- Dashboard now shows upcoming dates from unlabeled emails
+
 ## [1.1.0] - 2024-12-28
 
 ### Added

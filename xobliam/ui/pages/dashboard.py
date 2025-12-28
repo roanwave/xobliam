@@ -2,9 +2,12 @@
 
 import streamlit as st
 
+import pandas as pd
+
 from xobliam.analytics import (
     analyze_time_patterns,
     calculate_open_rate,
+    extract_dates_from_messages,
     get_day_of_week_distribution,
     get_frequent_senders,
 )
@@ -162,3 +165,36 @@ def render():
                 f"Found {deletion_summary['deletable']} emails safe to delete. "
                 "Check the Smart Delete page."
             )
+
+    # Deadlines & Dates section
+    st.divider()
+    st.subheader("Upcoming Dates & Deadlines")
+    st.caption("Dates extracted from unlabeled emails (sales, expirations, events, appointments)")
+
+    dates = extract_dates_from_messages(messages, unlabeled_only=True)
+
+    if not dates:
+        st.info("No upcoming dates found in unlabeled emails.")
+    else:
+        # Show up to 15 dates
+        display_dates = dates[:15]
+
+        df_data = []
+        for d in display_dates:
+            date_display = d["date_str"]
+            if d["has_time"] and d["time_str"]:
+                date_display += f" {d['time_str']}"
+
+            df_data.append({
+                "Date": date_display,
+                "Context": d["context"][:50] if d["context"] else "",
+                "Code": d["promo_code"] or "",
+                "Sender": d["sender"][:35] if d["sender"] else "",
+                "Subject": (d["subject"] or "")[:40],
+            })
+
+        df = pd.DataFrame(df_data)
+        st.dataframe(df, width="stretch", hide_index=True)
+
+        if len(dates) > 15:
+            st.caption(f"Showing 15 of {len(dates)} upcoming dates")
