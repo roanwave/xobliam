@@ -8,11 +8,15 @@ import click
 from dotenv import load_dotenv
 
 from xobliam.analytics import (
+    analyze_engagement_efficiency,
     analyze_time_patterns,
+    calculate_coherence_scores,
     calculate_open_rate,
     find_redundant_labels,
+    generate_recommendations,
     get_day_of_week_distribution,
     get_frequent_senders,
+    get_label_health_summary,
     get_label_stats,
     suggest_new_labels,
 )
@@ -28,13 +32,17 @@ from xobliam.ui.cli import (
     console,
     create_progress,
     print_category_breakdown,
+    print_coherence_analysis,
     print_deletion_candidates,
     print_deletion_summary,
+    print_engagement_efficiency,
     print_error,
     print_header,
     print_info,
+    print_label_health_summary,
     print_label_stats,
     print_new_label_suggestions,
+    print_recommendations,
     print_redundant_labels,
     print_sender_table,
     print_stats_summary,
@@ -270,9 +278,10 @@ def delete_cmd(dry_run: bool, execute: bool, min_score: int, confirm: bool, limi
 @cli.command()
 @click.option("--days", default=90, help="Number of days to analyze")
 @click.option("--show-system", is_flag=True, help="Include system labels in output")
-def labels(days: int, show_system: bool):
-    """Analyze labels and show optimization suggestions."""
-    print_header("Label Analysis")
+@click.option("--full", is_flag=True, help="Show full analysis (coherence, engagement)")
+def labels(days: int, show_system: bool, full: bool):
+    """Analyze labels and show optimization recommendations."""
+    print_header("Label Optimization Analysis")
 
     cache = MessageCache()
     messages = cache.get_cached_messages(since_days=days)
@@ -284,21 +293,40 @@ def labels(days: int, show_system: bool):
     # Get all labels from cache (including abandoned ones with 0 messages)
     all_labels = cache.get_cached_labels()
 
-    print_info(f"Analyzing {len(messages)} messages...\n")
+    print_info(f"Analyzing {len(messages)} messages from last {days} days...\n")
 
-    # Label stats (pass all_labels to include abandoned labels)
+    # 1. Label Health Summary (always show)
+    health = get_label_health_summary(messages, all_labels=all_labels)
+    print_label_health_summary(health)
+
+    # 2. Actionable Recommendations (always show)
+    recommendations = generate_recommendations(messages, all_labels=all_labels)
+    print_recommendations(recommendations)
+
+    # 3. Label stats table
+    console.print()
     label_stats = get_label_stats(messages, all_labels=all_labels)
     print_label_stats(label_stats, show_system=show_system)
-    console.print()
 
-    # Redundant labels
-    redundant = find_redundant_labels(messages)
-    print_redundant_labels(redundant)
-    console.print()
+    if full:
+        # 4. Coherence Analysis
+        coherence = calculate_coherence_scores(messages)
+        print_coherence_analysis(coherence)
 
-    # Suggestions
+        # 5. Engagement Efficiency
+        engagement = analyze_engagement_efficiency(messages)
+        print_engagement_efficiency(engagement)
+
+        # 6. Redundant label pairs (detailed)
+        console.print()
+        redundant = find_redundant_labels(messages, threshold=0.80)
+        print_redundant_labels(redundant)
+
+    # 7. New label suggestions (filtered to high-engagement only)
+    console.print()
     suggestions = suggest_new_labels(messages)
-    print_new_label_suggestions(suggestions)
+    if suggestions:
+        print_new_label_suggestions(suggestions)
 
 
 @cli.command()

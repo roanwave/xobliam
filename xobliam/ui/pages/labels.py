@@ -3,10 +3,16 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 
 from xobliam.analytics import (
+    analyze_engagement_efficiency,
+    calculate_coherence_scores,
+    find_label_overlaps,
     find_redundant_labels,
     find_split_candidates,
+    generate_recommendations,
+    get_label_health_summary,
     get_label_stats,
     suggest_new_labels,
 )
@@ -15,8 +21,8 @@ from xobliam.fetcher import MessageCache
 
 def render():
     """Render the labels page."""
-    st.title("Labels")
-    st.caption("Label analysis and optimization suggestions")
+    st.title("Label Optimization")
+    st.caption("Analyze and optimize your Gmail labels")
 
     # Load data
     cache = MessageCache()
@@ -30,92 +36,104 @@ def render():
     all_cached_labels = cache.get_cached_labels()
 
     # Tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["Overview", "All Labels", "Redundancy Audit", "Suggestions"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "Health Summary",
+        "All Labels",
+        "Coherence",
+        "Engagement",
+        "Overlap Analysis",
+    ])
 
     with tab1:
-        render_overview(messages, all_cached_labels)
+        render_health_summary(messages, all_cached_labels)
 
     with tab2:
         render_all_labels(messages, all_cached_labels)
 
     with tab3:
-        render_redundancy(messages)
+        render_coherence(messages)
 
     with tab4:
-        render_suggestions(messages)
+        render_engagement(messages)
+
+    with tab5:
+        render_overlap(messages)
 
 
-def render_overview(messages: list, all_cached_labels: list):
-    """Render label overview."""
-    st.subheader("Label Distribution")
+def render_health_summary(messages: list, all_cached_labels: list):
+    """Render label health summary and recommendations."""
+    st.subheader("Label Health Summary")
 
-    stats = get_label_stats(messages, all_labels=all_cached_labels)
-    all_labels = stats["labels"]
+    # Get health metrics
+    health = get_label_health_summary(messages, all_labels=all_cached_labels)
 
-    # Show unlabeled stats
-    col1, col2 = st.columns(2)
+    # Display metrics
+    col1, col2, col3, col4 = st.columns(4)
+
     with col1:
-        st.metric("Total Messages", f"{stats['total_messages']:,}")
+        st.metric(
+            "Working Well",
+            health["working_well"],
+            help="Labels with >30% read rate",
+        )
+
     with col2:
         st.metric(
-            "Unlabeled",
-            f"{stats['unlabeled_count']:,}",
-            f"{stats['unlabeled_percentage']:.1f}%",
+            "Needs Attention",
+            health["needs_attention"],
+            help="Labels with <10% read rate and >20 emails",
         )
+
+    with col3:
+        st.metric(
+            "Redundant Pairs",
+            health["redundant_pairs"],
+            help="Label pairs with >80% overlap",
+        )
+
+    with col4:
+        st.metric(
+            "Abandoned",
+            health["abandoned"],
+            help="Labels with 0 emails in timeframe",
+        )
+
+    st.info(f"Inbox average read rate: **{health['inbox_read_rate']:.1f}%**")
 
     st.divider()
 
-    # Filter to user labels and significant counts
-    user_labels = [
-        s for s in all_labels
-        if not s["is_system"] and s["count"] > 0
-    ]
+    # Recommendations
+    st.subheader("Actionable Recommendations")
 
-    if not user_labels:
-        st.info("No user-created labels found in your messages.")
-        # Show system labels instead
-        system_labels = [s for s in all_labels if s["count"] > 10]
-        if system_labels:
-            st.subheader("System Labels")
-            df = pd.DataFrame(system_labels[:20])
-            df = df[["label", "count", "read_rate"]]
-            df.columns = ["Label", "Emails", "Read Rate (%)"]
-            st.dataframe(df, width="stretch", hide_index=True)
+    recommendations = generate_recommendations(messages, all_labels=all_cached_labels)
+
+    if not recommendations:
+        st.success("No issues found - your labels are well organized!")
         return
 
-    # Treemap of labels
-    df = pd.DataFrame(user_labels[:30])
+    for rec in recommendations[:15]:
+        action = rec.get("action", "")
+        label = rec.get("label", "")
+        detail = rec.get("detail", "")
+        impact = rec.get("impact", "low")
 
-    fig = px.treemap(
-        df,
-        path=["label"],
-        values="count",
-        color="read_rate",
-        color_continuous_scale="RdYlGn",
-        color_continuous_midpoint=50,
-    )
-    fig.update_layout(height=500)
-    st.plotly_chart(fig, width="stretch")
+        # Color code by action type
+        if action == "MERGE":
+            icon = "🔴"
+        elif action == "FIX":
+            icon = "🟡"
+        elif action == "REVIEW":
+            icon = "🔵"
+        elif action == "CLEANUP":
+            icon = "⚪"
+        elif action == "SPLIT":
+            icon = "🟢"
+        else:
+            icon = "⚪"
 
-    # Table view
-    st.subheader("Label Statistics")
-
-    table_df = pd.DataFrame(user_labels)
-    table_df = table_df[["label", "count", "unread", "read_rate", "unique_senders"]]
-    table_df.columns = ["Label", "Emails", "Unread", "Read Rate (%)", "Unique Senders"]
-
-    st.dataframe(
-        table_df,
-        width="stretch",
-        hide_index=True,
-        column_config={
-            "Read Rate (%)": st.column_config.ProgressColumn(
-                min_value=0,
-                max_value=100,
-                format="%.1f%%",
-            ),
-        },
-    )
+        with st.expander(f"{icon} **{action}**: {label}"):
+            st.write(detail)
+            st.caption(f"Impact: {impact}")
 
 
 def render_all_labels(messages: list, all_cached_labels: list):
@@ -205,12 +223,6 @@ def render_all_labels(messages: list, all_cached_labels: list):
 
     df = pd.DataFrame(df_data)
 
-    # Style abandoned labels
-    def highlight_abandoned(row):
-        if row["Status"] == "Abandoned":
-            return ["background-color: #ffcccc"] * len(row)
-        return [""] * len(row)
-
     st.dataframe(
         df,
         width="stretch",
@@ -228,7 +240,6 @@ def render_all_labels(messages: list, all_cached_labels: list):
     abandoned = [l for l in user_labels if l["count"] == 0]
     if abandoned:
         st.divider()
-        st.subheader("Cleanup Suggestions")
         st.warning(
             f"Found **{len(abandoned)} abandoned label(s)** with no messages in the "
             "last 90 days. Consider deleting these to clean up your Gmail."
@@ -239,99 +250,233 @@ def render_all_labels(messages: list, all_cached_labels: list):
                 st.write(f"- {label['label']}")
 
 
-def render_redundancy(messages: list):
-    """Render redundancy audit."""
-    st.subheader("Redundant Label Pairs")
+def render_coherence(messages: list):
+    """Render label coherence analysis."""
+    st.subheader("Label Coherence Analysis")
     st.caption(
-        "Labels that frequently appear together may be candidates for merging. "
-        "A high co-occurrence rate means the labels are often used on the same emails."
+        "Coherence measures how focused a label is. High coherence means emails "
+        "are from similar senders. Low coherence means the label is too broad."
     )
 
-    # Threshold control
-    threshold = st.slider(
-        "Co-occurrence threshold (%)",
-        min_value=50,
-        max_value=100,
-        value=90,
-        step=5,
-    ) / 100
+    coherence = calculate_coherence_scores(messages)
 
-    redundant = find_redundant_labels(messages, threshold=threshold)
-
-    if not redundant:
-        st.success(f"No label pairs with >{threshold*100:.0f}% co-occurrence found.")
+    if not coherence:
+        st.info("No labels to analyze.")
         return
 
-    for pair in redundant:
-        with st.expander(
-            f"**{pair['label_a']}** + **{pair['label_b']}** "
-            f"({pair['co_occurrence_rate']:.1f}% co-occurrence)"
-        ):
-            col1, col2, col3 = st.columns(3)
+    # Build dataframe
+    df_data = []
+    for label, data in coherence.items():
+        df_data.append({
+            "Label": label,
+            "Coherence": data["coherence_score"],
+            "Emails": data["count"],
+            "Senders": data["unique_senders"],
+            "Domains": data["unique_domains"],
+            "Top Sender %": data["top_sender_pct"],
+            "Assessment": data["assessment"],
+        })
 
-            with col1:
-                st.metric(pair["label_a"], f"{pair['count_a']} emails")
+    df = pd.DataFrame(df_data)
+    df = df.sort_values("Emails", ascending=False)
 
-            with col2:
-                st.metric(pair["label_b"], f"{pair['count_b']} emails")
+    # Chart
+    fig = px.bar(
+        df.head(20),
+        x="Label",
+        y="Coherence",
+        color="Coherence",
+        color_continuous_scale="RdYlGn",
+        title="Coherence Score by Label (Top 20 by volume)",
+    )
+    fig.update_layout(height=400)
+    st.plotly_chart(fig, width="stretch")
 
-            with col3:
-                st.metric("Together", f"{pair['pair_count']} emails")
-
-            st.info(pair["suggestion"])
+    # Table
+    st.dataframe(
+        df,
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "Coherence": st.column_config.ProgressColumn(
+                min_value=0,
+                max_value=100,
+                format="%d",
+            ),
+        },
+    )
 
     # Split candidates
-    st.subheader("Split Candidates")
+    low_coherence = df[df["Coherence"] < 40]
+    if not low_coherence.empty:
+        st.divider()
+        st.warning(
+            f"Found **{len(low_coherence)} labels** with low coherence (<40). "
+            "These labels may be too broad and could benefit from splitting."
+        )
+
+
+def render_engagement(messages: list):
+    """Render engagement efficiency analysis."""
+    st.subheader("Engagement Efficiency")
     st.caption(
-        "Labels with many different senders might benefit from being split into more specific labels."
+        "Compare each label's read rate to your inbox average to see which labels "
+        "are working and which need attention."
     )
 
-    split = find_split_candidates(messages)
+    engagement = analyze_engagement_efficiency(messages)
+    inbox_avg = engagement["inbox_read_rate"]
 
-    if not split:
-        st.info("No labels identified as split candidates.")
-        return
+    st.info(f"Your inbox average read rate: **{inbox_avg:.1f}%**")
 
-    for candidate in split[:10]:
-        with st.expander(
-            f"**{candidate['label']}** - {candidate['unique_senders']} unique senders"
-        ):
-            st.metric("Total Emails", candidate["count"])
-            st.metric("Sender Diversity", f"{candidate['sender_diversity']:.2f}")
-            st.info(candidate["suggestion"])
+    # Build dataframe
+    df_data = []
+    for label, data in engagement["labels"].items():
+        df_data.append({
+            "Label": label,
+            "Read Rate": data["read_rate"],
+            "vs Average": data["difference"],
+            "Emails": data["count"],
+            "Status": data["status"].replace("_", " ").title(),
+        })
 
+    df = pd.DataFrame(df_data)
+    df = df.sort_values("Emails", ascending=False)
 
-def render_suggestions(messages: list):
-    """Render new label suggestions."""
-    st.subheader("Suggested New Labels")
-    st.caption(
-        "Based on patterns in your unlabeled emails, these new labels might help organize your inbox."
-    )
+    # Split into categories
+    above_avg = df[df["vs Average"] >= 10]
+    below_avg = df[df["vs Average"] <= -10]
 
-    suggestions = suggest_new_labels(messages)
+    col1, col2 = st.columns(2)
 
-    if not suggestions:
-        st.success("Your emails are well-organized! No new label suggestions.")
-        return
+    with col1:
+        st.metric("Labels Above Average", len(above_avg))
 
-    for suggestion in suggestions[:15]:
-        with st.expander(
-            f"**{suggestion['suggested_label']}** - {suggestion['message_count']} emails"
-        ):
-            st.write(f"**Domain:** {suggestion['domain']}")
-            st.write(f"**Email count:** {suggestion['message_count']}")
+    with col2:
+        st.metric("Labels Below Average", len(below_avg))
 
-            if suggestion.get("sample_subjects"):
-                st.write("**Sample subjects:**")
-                for subject in suggestion["sample_subjects"][:5]:
-                    st.write(f"- {subject[:80]}...")
-
-            if suggestion.get("common_words"):
-                st.write(f"**Common words:** {', '.join(suggestion['common_words'][:10])}")
-
-    # Summary
     st.divider()
-    total_unlabeled = sum(s["message_count"] for s in suggestions)
-    st.info(
-        f"Creating these labels could help organize approximately {total_unlabeled} emails."
+
+    # Chart
+    top_labels = df.head(25)
+    fig = px.bar(
+        top_labels,
+        x="Label",
+        y="Read Rate",
+        color="vs Average",
+        color_continuous_scale="RdYlGn",
+        color_continuous_midpoint=0,
+        title="Read Rate by Label (Top 25 by volume)",
+    )
+    fig.add_hline(
+        y=inbox_avg,
+        line_dash="dash",
+        line_color="gray",
+        annotation_text=f"Inbox avg: {inbox_avg:.1f}%",
+    )
+    fig.update_layout(height=450)
+    st.plotly_chart(fig, width="stretch")
+
+    # Table
+    st.dataframe(
+        df,
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "Read Rate": st.column_config.ProgressColumn(
+                min_value=0,
+                max_value=100,
+                format="%.1f%%",
+            ),
+            "vs Average": st.column_config.NumberColumn(
+                format="%+.1f",
+            ),
+        },
+    )
+
+    # Needs attention
+    needs_attention = engagement.get("needs_attention", [])
+    if needs_attention:
+        st.divider()
+        st.warning(
+            f"**{len(needs_attention)} labels need attention** (low read rate with significant volume). "
+            "Consider unsubscribing from these senders."
+        )
+        for label in needs_attention[:10]:
+            data = engagement["labels"].get(label, {})
+            st.write(f"- **{label}**: {data.get('read_rate', 0):.0f}% read rate, {data.get('count', 0)} emails")
+
+
+def render_overlap(messages: list):
+    """Render label overlap analysis."""
+    st.subheader("Label Overlap Analysis")
+    st.caption(
+        "Find labels that frequently appear together and may be candidates for merging."
+    )
+
+    # Threshold slider
+    min_overlap = st.slider(
+        "Minimum overlap %",
+        min_value=50,
+        max_value=100,
+        value=80,
+        step=5,
+    )
+
+    overlaps = find_label_overlaps(messages, min_overlap=min_overlap / 100)
+
+    if not overlaps:
+        st.success(f"No label pairs with >{min_overlap}% overlap found.")
+        return
+
+    st.write(f"Found **{len(overlaps)} overlapping pairs**")
+
+    # Build dataframe
+    df_data = []
+    for overlap in overlaps:
+        df_data.append({
+            "Label A": overlap["label_a"],
+            "Label B": overlap["label_b"],
+            "Overlap %": overlap["overlap_rate"],
+            "Shared Emails": overlap["overlap_count"],
+            "A Count": overlap["count_a"],
+            "B Count": overlap["count_b"],
+            "Action": overlap["action"],
+        })
+
+    df = pd.DataFrame(df_data)
+
+    # Show merge candidates prominently
+    merge_candidates = df[df["Action"] == "MERGE"]
+    if not merge_candidates.empty:
+        st.warning(f"**{len(merge_candidates)} pairs** are near-identical and should be merged:")
+
+        for _, row in merge_candidates.iterrows():
+            with st.expander(
+                f"**{row['Label A']}** + **{row['Label B']}** ({row['Overlap %']:.0f}% overlap)"
+            ):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric(row["Label A"], f"{row['A Count']} emails")
+                with col2:
+                    st.metric(row["Label B"], f"{row['B Count']} emails")
+                with col3:
+                    st.metric("Shared", f"{row['Shared Emails']} emails")
+                st.info(f"Recommendation: Merge these labels (they share {row['Overlap %']:.0f}% of emails)")
+
+    st.divider()
+
+    # Full table
+    st.subheader("All Overlapping Pairs")
+    st.dataframe(
+        df,
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "Overlap %": st.column_config.ProgressColumn(
+                min_value=0,
+                max_value=100,
+                format="%.0f%%",
+            ),
+        },
     )

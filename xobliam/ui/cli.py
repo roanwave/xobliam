@@ -288,21 +288,220 @@ def print_redundant_labels(redundant: list[dict[str, Any]]) -> None:
 
 
 def print_new_label_suggestions(suggestions: list[dict[str, Any]]) -> None:
-    """Print new label suggestions."""
+    """Print new label suggestions (filtered to high-engagement, non-marketing)."""
     if not suggestions:
-        print_info("No new label suggestions")
+        print_info("No label suggestions (only high-engagement, non-marketing emails qualify)")
         return
 
-    table = Table(title="Suggested New Labels")
+    table = Table(title="Suggested New Labels (High Engagement)")
     table.add_column("Label", style="cyan")
     table.add_column("Domain", style="dim")
     table.add_column("Count", justify="right", style="green")
+    table.add_column("Read Rate", justify="right", style="yellow")
 
     for suggestion in suggestions[:10]:
         table.add_row(
             suggestion.get("suggested_label", ""),
             suggestion.get("domain", ""),
             str(suggestion.get("message_count", 0)),
+            f"{suggestion.get('read_rate', 0):.0f}%",
         )
 
     console.print(table)
+
+
+def print_label_health_summary(summary: dict[str, Any]) -> None:
+    """Print label health summary."""
+    console.print("\n[bold]Label Health Summary[/bold]\n")
+
+    table = Table(show_header=False, box=None)
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green")
+    table.add_column("Status")
+
+    # Working well
+    working = summary.get("working_well", 0)
+    table.add_row(
+        "Working well (>30% read)",
+        str(working),
+        "[green]✓[/green]" if working > 0 else "",
+    )
+
+    # Needs attention
+    attention = summary.get("needs_attention", 0)
+    table.add_row(
+        "Needs attention (<10% read)",
+        str(attention),
+        "[yellow]![/yellow]" if attention > 0 else "[green]✓[/green]",
+    )
+
+    # Redundant pairs
+    redundant = summary.get("redundant_pairs", 0)
+    table.add_row(
+        "Redundant pairs (>80% overlap)",
+        str(redundant),
+        "[yellow]![/yellow]" if redundant > 0 else "[green]✓[/green]",
+    )
+
+    # Abandoned
+    abandoned = summary.get("abandoned", 0)
+    table.add_row(
+        "Abandoned (0 emails)",
+        str(abandoned),
+        "[dim]cleanup[/dim]" if abandoned > 0 else "[green]✓[/green]",
+    )
+
+    console.print(table)
+    console.print(f"\nInbox average read rate: [cyan]{summary.get('inbox_read_rate', 0):.1f}%[/cyan]")
+
+
+def print_recommendations(recommendations: list[dict[str, Any]]) -> None:
+    """Print actionable recommendations."""
+    if not recommendations:
+        print_success("No issues found - your labels are well organized!")
+        return
+
+    console.print("\n[bold]Actionable Recommendations[/bold]\n")
+
+    for rec in recommendations[:15]:
+        action = rec.get("action", "")
+        label = rec.get("label", "")
+        reason = rec.get("reason", "")
+        detail = rec.get("detail", "")
+
+        # Color code by action type
+        if action == "MERGE":
+            action_style = "[red]MERGE[/red]"
+        elif action == "FIX":
+            action_style = "[yellow]FIX[/yellow]"
+        elif action == "REVIEW":
+            action_style = "[blue]REVIEW[/blue]"
+        elif action == "CLEANUP":
+            action_style = "[dim]CLEANUP[/dim]"
+        elif action == "SPLIT":
+            action_style = "[cyan]SPLIT[/cyan]"
+        else:
+            action_style = action
+
+        console.print(f"  {action_style}: [bold]{label}[/bold]")
+        console.print(f"    {detail}", style="dim")
+        console.print()
+
+
+def print_coherence_analysis(coherence: dict[str, dict[str, Any]], limit: int = 15) -> None:
+    """Print label coherence analysis."""
+    if not coherence:
+        print_info("No labels to analyze")
+        return
+
+    console.print("\n[bold]Label Coherence Analysis[/bold]")
+    console.print("[dim]High coherence = focused label, Low coherence = too broad[/dim]\n")
+
+    table = Table(title="Coherence Scores")
+    table.add_column("Label", style="cyan", max_width=30)
+    table.add_column("Score", justify="right")
+    table.add_column("Emails", justify="right", style="green")
+    table.add_column("Senders", justify="right")
+    table.add_column("Assessment", style="dim")
+
+    # Sort by count (most emails first)
+    sorted_labels = sorted(
+        coherence.items(),
+        key=lambda x: x[1].get("count", 0),
+        reverse=True
+    )[:limit]
+
+    for label, data in sorted_labels:
+        score = data.get("coherence_score", 0)
+
+        # Color code score
+        if score >= 70:
+            score_display = f"[green]{score}[/green]"
+        elif score >= 40:
+            score_display = f"[yellow]{score}[/yellow]"
+        else:
+            score_display = f"[red]{score}[/red]"
+
+        table.add_row(
+            label[:30],
+            score_display,
+            str(data.get("count", 0)),
+            str(data.get("unique_senders", 0)),
+            data.get("assessment", ""),
+        )
+
+    console.print(table)
+
+
+def print_engagement_efficiency(engagement: dict[str, Any], limit: int = 15) -> None:
+    """Print engagement efficiency analysis."""
+    labels = engagement.get("labels", {})
+    inbox_avg = engagement.get("inbox_read_rate", 0)
+
+    if not labels:
+        print_info("No labels to analyze")
+        return
+
+    console.print(f"\n[bold]Engagement Efficiency[/bold] (inbox average: {inbox_avg:.1f}%)\n")
+
+    # Sort by difference from average
+    sorted_labels = sorted(
+        labels.items(),
+        key=lambda x: x[1].get("count", 0),
+        reverse=True
+    )[:limit]
+
+    table = Table(title="Label Engagement vs Inbox Average")
+    table.add_column("Label", style="cyan", max_width=30)
+    table.add_column("Read Rate", justify="right")
+    table.add_column("vs Avg", justify="right")
+    table.add_column("Emails", justify="right", style="dim")
+    table.add_column("Status")
+
+    for label, data in sorted_labels:
+        read_rate = data.get("read_rate", 0)
+        diff = data.get("difference", 0)
+        status = data.get("status", "")
+
+        # Color code read rate
+        if read_rate >= 50:
+            rate_display = f"[green]{read_rate:.0f}%[/green]"
+        elif read_rate >= 20:
+            rate_display = f"[yellow]{read_rate:.0f}%[/yellow]"
+        else:
+            rate_display = f"[red]{read_rate:.0f}%[/red]"
+
+        # Color code difference
+        if diff >= 10:
+            diff_display = f"[green]+{diff:.0f}[/green]"
+        elif diff <= -10:
+            diff_display = f"[red]{diff:.0f}[/red]"
+        else:
+            diff_display = f"{diff:.0f}"
+
+        # Status indicator
+        if status == "above_average":
+            status_display = "[green]✓ working[/green]"
+        elif status == "below_average":
+            status_display = "[yellow]! review[/yellow]"
+        else:
+            status_display = ""
+
+        table.add_row(
+            label[:30],
+            rate_display,
+            diff_display,
+            str(data.get("count", 0)),
+            status_display,
+        )
+
+    console.print(table)
+
+    # Summary
+    working = engagement.get("working_well", [])
+    attention = engagement.get("needs_attention", [])
+
+    if working:
+        console.print(f"\n[green]Labels working well:[/green] {', '.join(working[:5])}")
+    if attention:
+        console.print(f"[yellow]Labels needing attention:[/yellow] {', '.join(attention[:5])}")
