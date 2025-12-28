@@ -189,3 +189,99 @@ def delete_label(
         return {"success": True}
     except HttpError as e:
         return {"success": False, "error": str(e)}
+
+
+def create_label(
+    label_name: str,
+    service: Resource | None = None,
+) -> dict[str, Any]:
+    """
+    Create a new Gmail label.
+
+    Args:
+        label_name: Name for the new label.
+        service: Gmail API service.
+
+    Returns:
+        Dictionary with created label info or error.
+    """
+    if service is None:
+        service = get_gmail_service()
+
+    try:
+        label_body = {
+            "name": label_name,
+            "labelListVisibility": "labelShow",
+            "messageListVisibility": "show",
+        }
+        result = service.users().labels().create(userId="me", body=label_body).execute()
+        return {
+            "success": True,
+            "label_id": result.get("id"),
+            "label_name": result.get("name"),
+        }
+    except HttpError as e:
+        error_msg = str(e)
+        if "Label name exists" in error_msg or "already exists" in error_msg.lower():
+            return {"success": False, "error": f"Label '{label_name}' already exists"}
+        return {"success": False, "error": error_msg}
+
+
+def apply_label_to_messages(
+    message_ids: list[str],
+    label_id: str,
+    service: Resource | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> dict[str, Any]:
+    """
+    Apply a label to multiple messages using batch operations.
+
+    Args:
+        message_ids: List of message IDs to label.
+        label_id: ID of the label to apply.
+        service: Gmail API service.
+        progress_callback: Optional callback for progress updates (current, total).
+
+    Returns:
+        Dictionary with results.
+    """
+    if service is None:
+        service = get_gmail_service()
+
+    if not message_ids:
+        return {
+            "success": True,
+            "messages_labeled": 0,
+            "message": "No messages to label",
+        }
+
+    modified_count = 0
+    errors = []
+    batch_size = 100
+
+    for i in range(0, len(message_ids), batch_size):
+        batch = message_ids[i : i + batch_size]
+
+        try:
+            service.users().messages().batchModify(
+                userId="me",
+                body={
+                    "ids": batch,
+                    "addLabelIds": [label_id],
+                },
+            ).execute()
+
+            modified_count += len(batch)
+
+            if progress_callback:
+                progress_callback(modified_count, len(message_ids))
+
+        except HttpError as e:
+            errors.append({"batch_start": i, "error": str(e)})
+
+    return {
+        "success": len(errors) == 0,
+        "messages_labeled": modified_count,
+        "total_messages": len(message_ids),
+        "errors": errors if errors else None,
+    }

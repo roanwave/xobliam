@@ -25,8 +25,17 @@ All notable changes to xobliam will be documented in this file.
 - Activity by time block (6am-9am, 9am-12pm, etc.) with peak/quiet indicators
 - CLI: `xobliam stats --day Friday` for hourly breakdown
 
+**Label Manager (Smart Labeling)**
+- New "Label Manager" tab in Labels page for creating and bulk-applying labels
+- Create new Gmail labels directly from the UI
+- Find unlabeled emails by sender pattern (comma-separated, case-insensitive partial match)
+- Optional subject keyword filtering
+- Preview matching emails grouped by sender with checkboxes to include/exclude
+- Apply label to selected emails with progress tracking
+- Makes xobliam an inbox organization tool, not just analytics
+
 ### Changed
-- Labels page now has 6 tabs: Health Summary, All Labels, Label Details, Coherence, Engagement, Overlap & Merge
+- Labels page now has 7 tabs: Health Summary, All Labels, Label Details, Coherence, Engagement, Overlap & Merge, Label Manager
 - Analytics page now has 5 tabs: Time Patterns, Day Breakdown, Sender Analysis, Daily Distribution, Engagement
 
 ## [1.0.0] - 2024-12-27

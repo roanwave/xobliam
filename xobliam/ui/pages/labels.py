@@ -17,7 +17,14 @@ from xobliam.analytics import (
     get_label_stats,
     suggest_new_labels,
 )
-from xobliam.fetcher import MessageCache, get_label_id_by_name, merge_labels
+from xobliam.fetcher import (
+    MessageCache,
+    apply_label_to_messages,
+    create_label,
+    get_label_id_by_name,
+    merge_labels,
+)
+from xobliam.smart_delete.filters import filter_unlabeled_messages
 
 
 def render():
@@ -37,13 +44,14 @@ def render():
     all_cached_labels = cache.get_cached_labels()
 
     # Tabs
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "Health Summary",
         "All Labels",
         "Label Details",
         "Coherence",
         "Engagement",
         "Overlap & Merge",
+        "Label Manager",
     ])
 
     with tab1:
@@ -63,6 +71,9 @@ def render():
 
     with tab6:
         render_overlap_and_merge(messages, cache)
+
+    with tab7:
+        render_label_manager(messages, cache)
 
 
 def render_health_summary(messages: list, all_cached_labels: list):
@@ -686,3 +697,231 @@ def render_overlap_and_merge(messages: list, cache: MessageCache):
             ),
         },
     )
+
+
+def render_label_manager(messages: list, cache: MessageCache):
+    """Render label manager for creating labels and bulk-applying them."""
+    st.subheader("Label Manager")
+    st.caption(
+        "Create new labels and bulk-apply them to unlabeled emails based on sender patterns."
+    )
+
+    # Get existing labels for dropdown
+    cached_labels = cache.get_cached_labels()
+    user_labels = [l for l in cached_labels if l.get("type") == "user"]
+    label_names = sorted([l.get("name", "") for l in user_labels if l.get("name")])
+
+    # Initialize session state for created labels
+    if "created_labels" not in st.session_state:
+        st.session_state.created_labels = []
+
+    # Section 1: Create New Label
+    st.divider()
+    st.subheader("Create New Label")
+
+    col1, col2 = st.columns([3, 1])
+
+    with col1:
+        new_label_name = st.text_input(
+            "Label name",
+            placeholder="e.g., Fantasy Sports, Newsletters, Shopping",
+            key="new_label_input",
+        )
+
+    with col2:
+        st.write("")  # Spacer
+        st.write("")  # Spacer
+        create_btn = st.button("Create Label", type="primary", disabled=not new_label_name)
+
+    if create_btn and new_label_name:
+        with st.spinner(f"Creating label '{new_label_name}'..."):
+            result = create_label(new_label_name)
+
+        if result["success"]:
+            st.success(f"Created label '{result['label_name']}'")
+            # Add to session state for use in dropdown
+            st.session_state.created_labels.append({
+                "name": result["label_name"],
+                "label_id": result["label_id"],
+            })
+            st.info("Refresh data in Settings to see the new label in all views.")
+        else:
+            st.error(result.get("error", "Failed to create label"))
+
+    # Section 2: Bulk Apply Label
+    st.divider()
+    st.subheader("Bulk Apply Label (Smart Labeling)")
+    st.caption("Find unlabeled emails matching sender patterns and apply a label to them.")
+
+    # Combine existing labels with newly created ones
+    all_label_options = label_names.copy()
+    for created in st.session_state.created_labels:
+        if created["name"] not in all_label_options:
+            all_label_options.append(created["name"])
+    all_label_options = sorted(all_label_options)
+
+    if not all_label_options:
+        st.info("No labels available. Create a label first.")
+        return
+
+    # Label selection
+    selected_label = st.selectbox(
+        "Select label to apply",
+        all_label_options,
+        key="bulk_apply_label",
+    )
+
+    # Get label ID
+    selected_label_id = None
+    for created in st.session_state.created_labels:
+        if created["name"] == selected_label:
+            selected_label_id = created["label_id"]
+            break
+    if not selected_label_id:
+        selected_label_id = get_label_id_by_name(selected_label, cache=cache)
+
+    # Sender pattern input
+    st.write("**Find emails by sender pattern:**")
+    sender_pattern = st.text_input(
+        "Senders containing (comma-separated)",
+        placeholder="e.g., yahoo sports, fantasypros, espn, nfl",
+        key="sender_pattern_input",
+        help="Enter comma-separated terms to match sender addresses (case-insensitive, partial match)",
+    )
+
+    # Subject pattern input (optional)
+    with st.expander("Advanced: Filter by subject (optional)"):
+        subject_pattern = st.text_input(
+            "Subject containing",
+            placeholder="e.g., newsletter, weekly update",
+            key="subject_pattern_input",
+            help="Additional filter: only match emails with these terms in subject",
+        )
+
+    # Search button
+    if st.button("Search Emails", disabled=not sender_pattern):
+        # Filter to unlabeled emails only
+        unlabeled = filter_unlabeled_messages(messages)
+
+        if not unlabeled:
+            st.warning("No unlabeled emails found.")
+            return
+
+        # Parse search terms
+        terms = [t.strip().lower() for t in sender_pattern.split(",") if t.strip()]
+
+        # Find matching emails
+        matching_by_sender = {}
+        for msg in unlabeled:
+            sender = msg.get("sender", "").lower()
+            subject = (msg.get("subject", "") or "").lower()
+
+            # Check if sender matches any term
+            matches_sender = any(term in sender for term in terms)
+
+            # Check subject if pattern provided
+            if subject_pattern:
+                subject_terms = [t.strip().lower() for t in subject_pattern.split(",") if t.strip()]
+                matches_subject = any(term in subject for term in subject_terms)
+                matches = matches_sender and matches_subject
+            else:
+                matches = matches_sender
+
+            if matches:
+                original_sender = msg.get("sender", "unknown")
+                if original_sender not in matching_by_sender:
+                    matching_by_sender[original_sender] = []
+                matching_by_sender[original_sender].append(msg)
+
+        if not matching_by_sender:
+            st.warning(f"No unlabeled emails found matching '{sender_pattern}'")
+            return
+
+        # Store results in session state
+        st.session_state.search_results = matching_by_sender
+        st.session_state.search_label_id = selected_label_id
+        st.session_state.search_label_name = selected_label
+
+    # Display search results
+    if "search_results" in st.session_state and st.session_state.search_results:
+        matching_by_sender = st.session_state.search_results
+        total_emails = sum(len(msgs) for msgs in matching_by_sender.values())
+
+        st.divider()
+        st.write(f"**Found {total_emails} emails from {len(matching_by_sender)} senders:**")
+
+        # Initialize selected senders in session state
+        if "selected_senders" not in st.session_state:
+            st.session_state.selected_senders = {s: True for s in matching_by_sender}
+
+        # Ensure all current senders are in selected_senders
+        for sender in matching_by_sender:
+            if sender not in st.session_state.selected_senders:
+                st.session_state.selected_senders[sender] = True
+
+        # Display senders with checkboxes
+        selected_count = 0
+        selected_emails = 0
+
+        for sender, msgs in sorted(matching_by_sender.items(), key=lambda x: len(x[1]), reverse=True):
+            count = len(msgs)
+            is_selected = st.checkbox(
+                f"{sender} ({count} emails)",
+                value=st.session_state.selected_senders.get(sender, True),
+                key=f"sender_cb_{sender}",
+            )
+            st.session_state.selected_senders[sender] = is_selected
+
+            if is_selected:
+                selected_count += 1
+                selected_emails += count
+
+        st.divider()
+
+        # Apply button
+        label_name = st.session_state.get("search_label_name", selected_label)
+        label_id = st.session_state.get("search_label_id", selected_label_id)
+
+        if selected_emails > 0:
+            if st.button(
+                f"Apply label '{label_name}' to {selected_emails} emails",
+                type="primary",
+                key="apply_label_btn",
+            ):
+                # Collect message IDs to label
+                message_ids = []
+                for sender, msgs in matching_by_sender.items():
+                    if st.session_state.selected_senders.get(sender, False):
+                        message_ids.extend([m["message_id"] for m in msgs])
+
+                # Apply label with progress
+                with st.spinner(f"Applying label '{label_name}'..."):
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+
+                    def update_progress(current, total):
+                        progress_bar.progress(min(1.0, current / total))
+                        status_text.text(f"Labeling {current}/{total} emails...")
+
+                    result = apply_label_to_messages(
+                        message_ids=message_ids,
+                        label_id=label_id,
+                        progress_callback=update_progress,
+                    )
+
+                    progress_bar.empty()
+                    status_text.empty()
+
+                if result["success"]:
+                    st.success(
+                        f"Applied label '{label_name}' to {result['messages_labeled']} emails!"
+                    )
+                    st.info("Refresh data in Settings to see the updated labels.")
+                    # Clear search results
+                    del st.session_state.search_results
+                    if "selected_senders" in st.session_state:
+                        del st.session_state.selected_senders
+                else:
+                    st.error(f"Failed to apply label: {result.get('errors', 'Unknown error')}")
+        else:
+            st.info("Select at least one sender to apply the label.")
