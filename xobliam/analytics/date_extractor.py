@@ -33,6 +33,19 @@ CONTEXT_KEYWORDS = [
     "due", "submit", "reminder",
 ]
 
+# Context type detection for sanity checks
+DELIVERY_KEYWORDS = ["deliver", "arrival", "arrive", "ship", "order", "package", "tracking"]
+APPOINTMENT_KEYWORDS = ["appointment", "meeting", "call", "scheduled", "visit", "session"]
+SALE_KEYWORDS = ["sale", "offer", "discount", "deal", "promo", "expires", "ending", "through"]
+
+# Maximum days from email sent date for each context type
+MAX_DAYS_BY_TYPE = {
+    "delivery": 30,
+    "appointment": 90,
+    "sale": 60,
+    "default": 180,  # 6 months max for unknown types
+}
+
 # Promo code patterns
 PROMO_PATTERNS = [
     r"(?:code|promo|coupon|use)[:\s]+([A-Z0-9]{3,15})",
@@ -64,39 +77,105 @@ def extract_promo_code(text: str) -> str | None:
     return None
 
 
+def infer_year_from_email_date(
+    month: int,
+    day: int,
+    email_sent_date: datetime,
+) -> int:
+    """
+    Infer the correct year for a date based on email sent date.
+
+    Logic:
+    - If the date (month/day) is within 30 days AFTER email sent → use email's year
+    - If the date (month/day) is within 14 days BEFORE email sent → use email's year
+    - Otherwise, use next year only if it makes the date closer to email sent date
+    """
+    email_year = email_sent_date.year
+
+    try:
+        # Try with email's year first
+        candidate_same_year = datetime(email_year, month, day)
+    except ValueError:
+        return email_year  # Invalid date, just return email year
+
+    # Calculate days difference from email sent date
+    diff_same_year = (candidate_same_year - email_sent_date).days
+
+    # If date is within reasonable range of email sent date, use email's year
+    # Allow 14 days before (date might be mentioned as "starting on X")
+    # Allow 30 days after (most events/deliveries are within a month)
+    if -14 <= diff_same_year <= 30:
+        return email_year
+
+    # Try next year
+    try:
+        candidate_next_year = datetime(email_year + 1, month, day)
+        diff_next_year = (candidate_next_year - email_sent_date).days
+    except ValueError:
+        return email_year
+
+    # Try previous year (in case email is from early January about late December)
+    try:
+        candidate_prev_year = datetime(email_year - 1, month, day)
+        diff_prev_year = (candidate_prev_year - email_sent_date).days
+    except ValueError:
+        diff_prev_year = -999
+
+    # Choose the year that puts the date closest to (but after) email sent date
+    # Prefer dates that are 0-180 days after email sent
+    candidates = [
+        (email_year, diff_same_year),
+        (email_year + 1, diff_next_year),
+    ]
+    if diff_prev_year >= -14:
+        candidates.append((email_year - 1, diff_prev_year))
+
+    # Filter to reasonable candidates (within -14 to +180 days of email)
+    valid = [(y, d) for y, d in candidates if -14 <= d <= 180]
+
+    if valid:
+        # Return year with smallest positive difference (or smallest negative if all negative)
+        valid.sort(key=lambda x: (x[1] < 0, abs(x[1])))
+        return valid[0][0]
+
+    # Fallback: use email's year
+    return email_year
+
+
 def parse_date_from_match(
     match_text: str,
-    reference_date: datetime | None = None,
+    email_sent_date: datetime | None = None,
 ) -> datetime | None:
-    """Parse a date string into a datetime object."""
-    if reference_date is None:
-        reference_date = datetime.now()
+    """
+    Parse a date string into a datetime object.
 
-    current_year = reference_date.year
-    next_year = current_year + 1
+    Args:
+        match_text: The date string to parse.
+        email_sent_date: The date the email was sent (for year inference).
+    """
+    if email_sent_date is None:
+        email_sent_date = datetime.now()
 
     # Clean the match text
     text = match_text.strip().lower()
 
-    # Pattern: MM/DD/YYYY or MM/DD/YY
+    # Pattern: MM/DD/YYYY or MM/DD/YY or MM/DD
     match = re.match(r"(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?", text)
     if match:
         month = int(match.group(1))
         day = int(match.group(2))
-        year = match.group(3)
-        if year:
-            year = int(year)
+        year_str = match.group(3)
+
+        if year_str:
+            year = int(year_str)
             if year < 100:
                 year += 2000
         else:
-            # Infer year - if date is in the past, assume next year
-            year = current_year
+            # No year specified - infer from email sent date
+            year = infer_year_from_email_date(month, day, email_sent_date)
 
         try:
-            dt = datetime(year, month, day)
-            if dt < reference_date and not match.group(3):
-                dt = datetime(next_year, month, day)
-            return dt
+            return datetime(year, month, day)
         except ValueError:
             return None
 
@@ -106,10 +185,16 @@ def parse_date_from_match(
         match = re.search(pattern, text)
         if match:
             day = int(match.group(1))
-            year = int(match.group(2)) if match.group(2) else current_year
+            year_str = match.group(2)
             hour = int(match.group(3)) if match.group(3) else None
             minute = int(match.group(4)) if match.group(4) else 0
             ampm = match.group(5) if match.group(5) else None
+
+            if year_str:
+                year = int(year_str)
+            else:
+                # No year specified - infer from email sent date
+                year = infer_year_from_email_date(month_num, day, email_sent_date)
 
             if hour and ampm:
                 if ampm.lower() == "pm" and hour < 12:
@@ -119,13 +204,9 @@ def parse_date_from_match(
 
             try:
                 if hour is not None:
-                    dt = datetime(year, month_num, day, hour, minute)
+                    return datetime(year, month_num, day, hour, minute)
                 else:
-                    dt = datetime(year, month_num, day)
-
-                if dt < reference_date and not match.group(2):
-                    dt = dt.replace(year=next_year)
-                return dt
+                    return datetime(year, month_num, day)
             except ValueError:
                 return None
 
@@ -161,10 +242,65 @@ def extract_context(text: str, date_start: int, date_end: int, words: int = 12) 
     return context[:60] if context else ""
 
 
-def extract_dates_from_text(text: str) -> list[dict[str, Any]]:
-    """Extract all dates from text with context."""
+def detect_context_type(text: str) -> str:
+    """Detect the type of date context for sanity checking."""
+    text_lower = text.lower()
+
+    for keyword in DELIVERY_KEYWORDS:
+        if keyword in text_lower:
+            return "delivery"
+
+    for keyword in APPOINTMENT_KEYWORDS:
+        if keyword in text_lower:
+            return "appointment"
+
+    for keyword in SALE_KEYWORDS:
+        if keyword in text_lower:
+            return "sale"
+
+    return "default"
+
+
+def is_date_reasonable(
+    parsed_date: datetime,
+    email_sent_date: datetime,
+    context_type: str,
+) -> bool:
+    """
+    Check if a parsed date is reasonable given the email sent date and context.
+
+    Returns True if the date passes sanity checks.
+    """
+    days_from_email = (parsed_date - email_sent_date).days
+
+    # Date shouldn't be more than 14 days before email was sent
+    if days_from_email < -14:
+        return False
+
+    # Check against maximum days for this context type
+    max_days = MAX_DAYS_BY_TYPE.get(context_type, MAX_DAYS_BY_TYPE["default"])
+    if days_from_email > max_days:
+        return False
+
+    return True
+
+
+def extract_dates_from_text(
+    text: str,
+    email_sent_date: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Extract all dates from text with context.
+
+    Args:
+        text: The text to extract dates from.
+        email_sent_date: The date the email was sent (for year inference).
+    """
     if not text:
         return []
+
+    if email_sent_date is None:
+        email_sent_date = datetime.now()
 
     results = []
     now = datetime.now()
@@ -180,7 +316,7 @@ def extract_dates_from_text(text: str) -> list[dict[str, Any]]:
 
     # Context trigger patterns - only extract dates near these keywords
     context_triggers = r"(?:through|until|by|before|expires?|expiring|ends?|ending|deadline|scheduled|" \
-                      r"appointment|webinar|event|rsvp|register|last\s+(?:day|chance)|due|offer|sale)"
+                      r"appointment|webinar|event|rsvp|register|last\s+(?:day|chance)|due|offer|sale|deliver|arrive|ship)"
 
     text_lower = text.lower()
 
@@ -198,14 +334,23 @@ def extract_dates_from_text(text: str) -> list[dict[str, Any]]:
             if not re.search(context_triggers, context_window):
                 continue
 
-            # Parse the date
-            parsed_date = parse_date_from_match(match_text)
+            # Detect context type for sanity checking
+            context_type = detect_context_type(context_window)
+
+            # Parse the date using email sent date for year inference
+            parsed_date = parse_date_from_match(match_text, email_sent_date)
             if not parsed_date:
                 continue
 
-            # Only include future dates (within 1 year)
+            # Sanity check: is the date reasonable given email sent date and context?
+            if not is_date_reasonable(parsed_date, email_sent_date, context_type):
+                continue
+
+            # Only include dates that are still in the future relative to TODAY
             if parsed_date < now:
                 continue
+
+            # Don't include dates more than 1 year from now
             if parsed_date > now + timedelta(days=365):
                 continue
 
@@ -218,10 +363,38 @@ def extract_dates_from_text(text: str) -> list[dict[str, Any]]:
                 "has_time": parsed_date.hour != 0 or parsed_date.minute != 0,
                 "time_str": parsed_date.strftime("%I:%M %p").lstrip("0") if parsed_date.hour != 0 else None,
                 "context": context,
+                "context_type": context_type,
                 "match_text": match_text,
             })
 
     return results
+
+
+def parse_email_date(date_str: str | None) -> datetime | None:
+    """Parse email date string to datetime."""
+    if not date_str:
+        return None
+
+    try:
+        # Try ISO format first (most common in our cache)
+        return datetime.fromisoformat(date_str.replace("Z", "+00:00")).replace(tzinfo=None)
+    except (ValueError, AttributeError):
+        pass
+
+    # Try common email date formats
+    formats = [
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d",
+    ]
+
+    for fmt in formats:
+        try:
+            return datetime.strptime(date_str, fmt)
+        except ValueError:
+            continue
+
+    return None
 
 
 def extract_dates_from_message(message: dict[str, Any]) -> list[dict[str, Any]]:
@@ -233,8 +406,13 @@ def extract_dates_from_message(message: dict[str, Any]) -> list[dict[str, Any]]:
     snippet = message.get("snippet", "") or ""
     combined_text = f"{subject} {snippet}"
 
-    # Extract dates
-    dates = extract_dates_from_text(combined_text)
+    # Get email sent date for year inference
+    email_sent_date = parse_email_date(message.get("date"))
+    if email_sent_date is None:
+        email_sent_date = datetime.now()
+
+    # Extract dates using email sent date for context
+    dates = extract_dates_from_text(combined_text, email_sent_date)
 
     # Extract promo code from full text
     promo_code = extract_promo_code(combined_text)
@@ -247,6 +425,7 @@ def extract_dates_from_message(message: dict[str, Any]) -> list[dict[str, Any]]:
             "subject": subject,
             "snippet": snippet,
             "promo_code": promo_code,
+            "email_date": email_sent_date.strftime("%Y-%m-%d") if email_sent_date else None,
         })
 
     return results

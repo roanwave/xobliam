@@ -185,16 +185,55 @@ def render():
             if d["has_time"] and d["time_str"]:
                 date_display += f" {d['time_str']}"
 
+            # Truncate long fields
+            context = (d["context"] or "")[:40]
+            if len(d.get("context", "") or "") > 40:
+                context += "..."
+
+            subject = (d["subject"] or "")[:40]
+            if len(d.get("subject", "") or "") > 40:
+                subject += "..."
+
+            sender = (d["sender"] or "")[:35]
+
             df_data.append({
                 "Date": date_display,
-                "Context": d["context"][:50] if d["context"] else "",
-                "Code": d["promo_code"] or "",
-                "Sender": d["sender"][:35] if d["sender"] else "",
-                "Subject": (d["subject"] or "")[:40],
+                "Context": context,
+                "Code": d["promo_code"] or "—",
+                "Sender": sender,
+                "Subject": subject,
             })
 
         df = pd.DataFrame(df_data)
-        st.dataframe(df, width="stretch", hide_index=True)
+
+        # Use column_config for proper column widths and formatting
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Date": st.column_config.TextColumn(
+                    "Date",
+                    width="small",
+                ),
+                "Context": st.column_config.TextColumn(
+                    "Context",
+                    width="medium",
+                ),
+                "Code": st.column_config.TextColumn(
+                    "Code",
+                    width="small",
+                ),
+                "Sender": st.column_config.TextColumn(
+                    "Sender",
+                    width="medium",
+                ),
+                "Subject": st.column_config.TextColumn(
+                    "Subject",
+                    width="medium",
+                ),
+            },
+        )
 
         if len(dates) > 15:
             st.caption(f"Showing 15 of {len(dates)} upcoming dates")
