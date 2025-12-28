@@ -386,7 +386,8 @@ def render_execution(messages: list, cache: MessageCache):
             status_text = st.empty()
 
             def update_progress(current: int, total: int):
-                progress_bar.progress(current / total)
+                pct = min(1.0, current / total) if total > 0 else 0
+                progress_bar.progress(pct)
                 status_text.text(f"Deleting {current} of {total}...")
 
             with st.spinner("Deleting emails..."):

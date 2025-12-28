@@ -115,7 +115,7 @@ def _refresh_data_with_progress():
     progress_bar = st.sidebar.progress(0, text="Starting...")
 
     def update_progress(current: int, total: int):
-        pct = current / total if total > 0 else 0
+        pct = min(1.0, current / total) if total > 0 else 0
         progress_bar.progress(pct, text=f"Fetching... ({current:,}/{total:,})")
 
     try:
