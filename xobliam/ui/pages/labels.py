@@ -26,24 +26,30 @@ def render():
         st.warning("No email data available. Click 'Refresh Data' in the sidebar.")
         return
 
+    # Get all labels from cache (including abandoned ones)
+    all_cached_labels = cache.get_cached_labels()
+
     # Tabs
-    tab1, tab2, tab3 = st.tabs(["Overview", "Redundancy Audit", "Suggestions"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Overview", "All Labels", "Redundancy Audit", "Suggestions"])
 
     with tab1:
-        render_overview(messages)
+        render_overview(messages, all_cached_labels)
 
     with tab2:
-        render_redundancy(messages)
+        render_all_labels(messages, all_cached_labels)
 
     with tab3:
+        render_redundancy(messages)
+
+    with tab4:
         render_suggestions(messages)
 
 
-def render_overview(messages: list):
+def render_overview(messages: list, all_cached_labels: list):
     """Render label overview."""
     st.subheader("Label Distribution")
 
-    stats = get_label_stats(messages)
+    stats = get_label_stats(messages, all_labels=all_cached_labels)
     all_labels = stats["labels"]
 
     # Show unlabeled stats
@@ -110,6 +116,127 @@ def render_overview(messages: list):
             ),
         },
     )
+
+
+def render_all_labels(messages: list, all_cached_labels: list):
+    """Render complete label list with abandoned detection."""
+    st.subheader("All User Labels")
+    st.caption(
+        "Complete list of your labels, including abandoned ones with 0 messages "
+        "in the current timeframe."
+    )
+
+    # Get stats with all cached labels to include abandoned ones
+    stats = get_label_stats(messages, all_labels=all_cached_labels)
+    all_labels = stats["labels"]
+
+    # Filter to user labels only (no system labels)
+    user_labels = [l for l in all_labels if not l["is_system"]]
+
+    # Summary metrics
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric("Total User Labels", len(user_labels))
+
+    with col2:
+        active_count = len([l for l in user_labels if l["count"] > 0])
+        st.metric("Active Labels", active_count)
+
+    with col3:
+        abandoned_count = len([l for l in user_labels if l["count"] == 0])
+        st.metric("Abandoned Labels", abandoned_count)
+
+    st.divider()
+
+    # Filter options
+    col1, col2 = st.columns(2)
+
+    with col1:
+        show_filter = st.selectbox(
+            "Show",
+            ["All Labels", "Active Only", "Abandoned Only"],
+            key="label_filter",
+        )
+
+    with col2:
+        sort_by = st.selectbox(
+            "Sort by",
+            ["Count (High to Low)", "Count (Low to High)", "Name (A-Z)", "Read Rate"],
+            key="label_sort",
+        )
+
+    # Apply filters
+    if show_filter == "Active Only":
+        filtered_labels = [l for l in user_labels if l["count"] > 0]
+    elif show_filter == "Abandoned Only":
+        filtered_labels = [l for l in user_labels if l["count"] == 0]
+    else:
+        filtered_labels = user_labels
+
+    # Apply sorting
+    if sort_by == "Count (High to Low)":
+        filtered_labels = sorted(filtered_labels, key=lambda x: x["count"], reverse=True)
+    elif sort_by == "Count (Low to High)":
+        filtered_labels = sorted(filtered_labels, key=lambda x: x["count"])
+    elif sort_by == "Name (A-Z)":
+        filtered_labels = sorted(filtered_labels, key=lambda x: x["label"].lower())
+    elif sort_by == "Read Rate":
+        filtered_labels = sorted(filtered_labels, key=lambda x: x["read_rate"], reverse=True)
+
+    if not filtered_labels:
+        st.info("No labels match the current filter.")
+        return
+
+    st.write(f"Showing {len(filtered_labels)} labels")
+
+    # Build dataframe with status column
+    df_data = []
+    for label in filtered_labels:
+        status = "Abandoned" if label["count"] == 0 else "Active"
+        df_data.append({
+            "Label": label["label"],
+            "Status": status,
+            "Emails": label["count"],
+            "Unread": label["unread"],
+            "Read Rate (%)": label["read_rate"],
+            "Unique Senders": label["unique_senders"],
+        })
+
+    df = pd.DataFrame(df_data)
+
+    # Style abandoned labels
+    def highlight_abandoned(row):
+        if row["Status"] == "Abandoned":
+            return ["background-color: #ffcccc"] * len(row)
+        return [""] * len(row)
+
+    st.dataframe(
+        df,
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "Read Rate (%)": st.column_config.ProgressColumn(
+                min_value=0,
+                max_value=100,
+                format="%.1f%%",
+            ),
+        },
+    )
+
+    # Abandoned labels cleanup suggestion
+    abandoned = [l for l in user_labels if l["count"] == 0]
+    if abandoned:
+        st.divider()
+        st.subheader("Cleanup Suggestions")
+        st.warning(
+            f"Found **{len(abandoned)} abandoned label(s)** with no messages in the "
+            "last 90 days. Consider deleting these to clean up your Gmail."
+        )
+
+        with st.expander("View abandoned labels"):
+            for label in abandoned:
+                st.write(f"- {label['label']}")
 
 
 def render_redundancy(messages: list):
