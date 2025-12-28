@@ -34,6 +34,10 @@ def fetch_labels(
         if cached_labels:
             return cached_labels
 
+    # Clear old labels before fetching fresh ones
+    # This ensures deleted labels don't persist in the cache
+    cache.clear_labels()
+
     # Fetch from API
     if service is None:
         service = get_gmail_service()

@@ -298,6 +298,18 @@ class MessageCache:
             conn.execute("DELETE FROM cache_metadata")
             conn.commit()
 
+    def clear_labels(self) -> None:
+        """Clear only the labels table."""
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM labels")
+            conn.commit()
+
+    def clear_messages(self) -> None:
+        """Clear only the messages table."""
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM messages")
+            conn.commit()
+
     def delete_messages(self, message_ids: list[str]) -> int:
         """
         Delete messages from cache.

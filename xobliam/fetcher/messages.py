@@ -132,11 +132,16 @@ def fetch_messages(
         if cached:
             return cached
 
+    # Clear old messages before fetching fresh ones
+    # This ensures deleted messages and stale label assignments don't persist
+    cache.clear_messages()
+
     # Fetch from API
     if service is None:
         service = get_gmail_service()
 
     # Fetch labels first to build ID-to-name mapping
+    # (This also clears and refreshes the labels table)
     from .labels import fetch_labels
 
     fetch_labels(service=service, cache=cache, use_cache=False)
