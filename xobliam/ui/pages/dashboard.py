@@ -206,34 +206,8 @@ def render():
 
         df = pd.DataFrame(df_data)
 
-        # Use column_config for proper column widths and formatting
-        st.dataframe(
-            df,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Date": st.column_config.TextColumn(
-                    "Date",
-                    width="small",
-                ),
-                "Context": st.column_config.TextColumn(
-                    "Context",
-                    width="medium",
-                ),
-                "Code": st.column_config.TextColumn(
-                    "Code",
-                    width="small",
-                ),
-                "Sender": st.column_config.TextColumn(
-                    "Sender",
-                    width="medium",
-                ),
-                "Subject": st.column_config.TextColumn(
-                    "Subject",
-                    width="medium",
-                ),
-            },
-        )
+        # Render as proper table
+        st.dataframe(df, width="stretch", hide_index=True)
 
         if len(dates) > 15:
             st.caption(f"Showing 15 of {len(dates)} upcoming dates")
