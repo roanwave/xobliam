@@ -60,12 +60,16 @@ def has_attachments(payload: dict) -> bool:
     return False
 
 
-def extract_message_metadata(message: dict) -> dict[str, Any]:
+def extract_message_metadata(
+    message: dict,
+    label_map: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """
     Extract relevant metadata from a Gmail API message response.
 
     Args:
         message: Raw message from Gmail API.
+        label_map: Optional mapping of label IDs to human-readable names.
 
     Returns:
         Dictionary with extracted metadata.
@@ -74,6 +78,12 @@ def extract_message_metadata(message: dict) -> dict[str, Any]:
     headers = payload.get("headers", [])
     label_ids = message.get("labelIds", [])
 
+    # Convert label IDs to names if mapping provided
+    if label_map:
+        labels = [label_map.get(lid, lid) for lid in label_ids]
+    else:
+        labels = label_ids
+
     return {
         "message_id": message.get("id"),
         "thread_id": message.get("threadId"),
@@ -81,7 +91,7 @@ def extract_message_metadata(message: dict) -> dict[str, Any]:
         "sender": parse_email_address(get_header_value(headers, "From")),
         "recipients": get_header_value(headers, "To"),
         "subject": get_header_value(headers, "Subject"),
-        "labels": label_ids,
+        "labels": labels,
         "is_unread": "UNREAD" in label_ids,
         "has_attachments": has_attachments(payload),
         "snippet": message.get("snippet", ""),
@@ -126,6 +136,12 @@ def fetch_messages(
     if service is None:
         service = get_gmail_service()
 
+    # Fetch labels first to build ID-to-name mapping
+    from .labels import fetch_labels
+
+    fetch_labels(service=service, cache=cache, use_cache=False)
+    label_map = cache.get_label_id_to_name_map()
+
     # Build date query
     after_date = datetime.utcnow() - timedelta(days=days)
     query = f"after:{after_date.strftime('%Y/%m/%d')}"
@@ -161,7 +177,7 @@ def fetch_messages(
             break
 
         # Fetch full message details in batches
-        batch_messages = _fetch_message_batch(service, message_refs)
+        batch_messages = _fetch_message_batch(service, message_refs, label_map=label_map)
         messages.extend(batch_messages)
 
         total_fetched += len(batch_messages)
@@ -185,6 +201,7 @@ def _fetch_message_batch(
     service: Resource,
     message_refs: list[dict],
     batch_size: int = 100,
+    label_map: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Fetch full message details for a batch of message references.
@@ -193,6 +210,7 @@ def _fetch_message_batch(
         service: Gmail API service.
         message_refs: List of message reference dicts with 'id' keys.
         batch_size: Number of messages to fetch in parallel.
+        label_map: Optional mapping of label IDs to human-readable names.
 
     Returns:
         List of extracted message metadata.
@@ -218,7 +236,7 @@ def _fetch_message_batch(
                         )
                         .execute()
                     )
-                    messages.append(extract_message_metadata(msg))
+                    messages.append(extract_message_metadata(msg, label_map))
                     retries = 0
                     break
                 except HttpError as e:

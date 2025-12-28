@@ -246,6 +246,17 @@ class MessageCache:
             cursor = conn.execute("SELECT * FROM labels ORDER BY name")
             return [dict(row) for row in cursor]
 
+    def get_label_id_to_name_map(self) -> dict[str, str]:
+        """
+        Get a mapping of label IDs to human-readable names.
+
+        Returns:
+            Dictionary mapping label_id to name.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute("SELECT label_id, name FROM labels")
+            return {row["label_id"]: row["name"] for row in cursor}
+
     def is_fresh(self, max_age_hours: int = 1) -> bool:
         """
         Check if cache is fresh enough.
