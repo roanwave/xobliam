@@ -841,3 +841,77 @@ def suggest_new_labels(
         })
 
     return sorted(suggestions, key=lambda x: x["message_count"], reverse=True)
+
+
+def get_label_sender_breakdown(
+    messages: list[dict[str, Any]],
+    label_name: str,
+) -> dict[str, Any]:
+    """
+    Get sender breakdown for a specific label.
+
+    Shows which senders are under a label, ranked by volume,
+    with read rate per sender.
+
+    Args:
+        messages: List of message dictionaries.
+        label_name: Name of the label to analyze.
+
+    Returns:
+        Dictionary with label stats and sender breakdown.
+    """
+    sender_data: dict[str, dict] = defaultdict(
+        lambda: {"count": 0, "unread": 0, "subjects": []}
+    )
+
+    total_count = 0
+    total_unread = 0
+
+    for msg in messages:
+        labels = msg.get("labels", [])
+        if label_name not in labels:
+            continue
+
+        sender = msg.get("sender", "unknown")
+        is_unread = msg.get("is_unread", False)
+        subject = msg.get("subject", "") or "(no subject)"
+
+        total_count += 1
+        if is_unread:
+            total_unread += 1
+
+        sender_data[sender]["count"] += 1
+        if is_unread:
+            sender_data[sender]["unread"] += 1
+        if len(sender_data[sender]["subjects"]) < 5:
+            sender_data[sender]["subjects"].append(subject[:60])
+
+    # Build sender list
+    senders = []
+    for sender, data in sender_data.items():
+        count = data["count"]
+        unread = data["unread"]
+        read_count = count - unread
+        read_rate = round((read_count / count) * 100, 1) if count > 0 else 0
+
+        senders.append({
+            "sender": sender,
+            "count": count,
+            "unread": unread,
+            "read_rate": read_rate,
+            "sample_subjects": data["subjects"],
+        })
+
+    # Sort by count (highest first)
+    senders = sorted(senders, key=lambda x: x["count"], reverse=True)
+
+    total_read_rate = round(((total_count - total_unread) / total_count) * 100, 1) if total_count > 0 else 0
+
+    return {
+        "label": label_name,
+        "total_count": total_count,
+        "total_unread": total_unread,
+        "total_read_rate": total_read_rate,
+        "unique_senders": len(senders),
+        "senders": senders,
+    }

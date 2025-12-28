@@ -585,3 +585,126 @@ def print_engagement_efficiency(engagement: dict[str, Any], limit: int = 15) -> 
         console.print(f"\n[green]Labels working well:[/green] {', '.join(working[:5])}")
     if attention:
         console.print(f"[yellow]Labels needing attention:[/yellow] {', '.join(attention[:5])}")
+
+
+def print_label_sender_breakdown(breakdown: dict[str, Any]) -> None:
+    """Print sender breakdown for a specific label."""
+    label_name = breakdown.get("label_name", "Unknown")
+    total = breakdown.get("total_count", 0)
+    unread = breakdown.get("unread_count", 0)
+    read_rate = breakdown.get("read_rate", 0)
+    senders = breakdown.get("senders", [])
+
+    console.print(f"\n[bold]Sender Breakdown for '{label_name}'[/bold]\n")
+
+    # Summary
+    table = Table(show_header=False, box=None)
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green")
+
+    table.add_row("Total Emails", str(total))
+    table.add_row("Unread", str(unread))
+    table.add_row("Read Rate", f"{read_rate:.1f}%")
+    table.add_row("Unique Senders", str(breakdown.get("unique_senders", 0)))
+
+    console.print(table)
+    console.print()
+
+    if not senders:
+        print_info("No senders found for this label.")
+        return
+
+    # Sender table
+    sender_table = Table(title=f"Senders in '{label_name}'")
+    sender_table.add_column("Sender", style="cyan", max_width=40)
+    sender_table.add_column("Count", justify="right", style="green")
+    sender_table.add_column("Read Rate", justify="right", style="yellow")
+    sender_table.add_column("% of Label", justify="right", style="dim")
+
+    for sender in senders[:25]:
+        sender_table.add_row(
+            sender.get("sender", "")[:40],
+            str(sender.get("count", 0)),
+            f"{sender.get('read_rate', 0):.1f}%",
+            f"{sender.get('percentage', 0):.1f}%",
+        )
+
+    console.print(sender_table)
+
+    if len(senders) > 25:
+        console.print(f"\n[dim]... and {len(senders) - 25} more senders[/dim]")
+
+
+def print_day_hourly_breakdown(breakdown: dict[str, Any]) -> None:
+    """Print hourly breakdown for a specific day of the week."""
+    day_name = breakdown.get("day_name", "Unknown")
+    total = breakdown.get("total_emails", 0)
+    blocks = breakdown.get("blocks", [])
+    quiet_times = breakdown.get("quiet_times", [])
+    peak_times = breakdown.get("peak_times", [])
+
+    console.print(f"\n[bold]Hourly Breakdown for {day_name}s[/bold]\n")
+
+    # Summary
+    console.print(f"Total emails on {day_name}s: [green]{total}[/green]")
+    if peak_times:
+        console.print(f"Peak period: [red]{peak_times[0]}[/red]")
+    if quiet_times:
+        console.print(f"Quiet periods: [blue]{', '.join(quiet_times)}[/blue]")
+    console.print()
+
+    # Focus mode suggestion
+    suggestion = breakdown.get("focus_mode_suggestion", "")
+    if suggestion and "Low traffic" in suggestion:
+        console.print(f"[green]🎯 Focus Mode:[/green] {suggestion}\n")
+
+    # Hourly chart (ASCII bar chart)
+    hourly_counts = breakdown.get("hourly_counts", [0] * 24)
+    max_count = max(hourly_counts) if hourly_counts else 1
+
+    console.print("[bold]Hourly Activity[/bold]")
+    console.print("[dim](Each █ = ~{:.0f} emails)[/dim]\n".format(max_count / 10 if max_count > 10 else 1))
+
+    for hour in range(24):
+        count = hourly_counts[hour]
+        bar_len = int((count / max_count) * 20) if max_count > 0 else 0
+        bar = "█" * bar_len
+
+        # Highlight peak and quiet hours
+        if count == max_count and max_count > 0:
+            bar_style = "red"
+        elif count < max_count * 0.3:
+            bar_style = "blue"
+        else:
+            bar_style = "green"
+
+        console.print(f"{hour:02d}:00  [{bar_style}]{bar}[/{bar_style}] {count}")
+
+    # Time blocks table
+    console.print("\n[bold]Activity by Time Block[/bold]\n")
+
+    block_table = Table()
+    block_table.add_column("Time Block", style="cyan")
+    block_table.add_column("Emails", justify="right", style="green")
+    block_table.add_column("% of Day", justify="right")
+    block_table.add_column("Status")
+
+    for block in blocks:
+        is_peak = block.get("is_peak", False)
+        pct = block.get("percentage", 0)
+
+        if is_peak:
+            status = "[red]🔥 Peak[/red]"
+        elif pct < 10:
+            status = "[blue]🌙 Quiet[/blue]"
+        else:
+            status = ""
+
+        block_table.add_row(
+            block.get("label", ""),
+            str(block.get("count", 0)),
+            f"{pct:.1f}%",
+            status,
+        )
+
+    console.print(block_table)

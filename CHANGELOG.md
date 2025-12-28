@@ -2,6 +2,33 @@
 
 All notable changes to xobliam will be documented in this file.
 
+## [1.1.0] - 2024-12-28
+
+### Added
+
+**Label Sender Breakdown**
+- New "Label Details" tab in Labels page showing sender breakdown for each label
+- Senders ranked by volume with read rate per sender and percentage of label
+- CLI: `xobliam labels --label "LabelName"` to view sender breakdown
+
+**Label Merge Execution**
+- "Merge Now" button in Labels > Overlap & Merge tab
+- Modal confirmation with merge direction selection
+- Execute merges via Gmail API: add target label, remove source label
+- Option to delete source label after merge
+- Progress tracking during merge operation
+
+**Per-Day Hourly Breakdown**
+- New "Day Breakdown" tab in Analytics page
+- Select any day of the week to see hourly email distribution
+- Automatic "Focus Mode" suggestions identifying low-traffic periods
+- Activity by time block (6am-9am, 9am-12pm, etc.) with peak/quiet indicators
+- CLI: `xobliam stats --day Friday` for hourly breakdown
+
+### Changed
+- Labels page now has 6 tabs: Health Summary, All Labels, Label Details, Coherence, Engagement, Overlap & Merge
+- Analytics page now has 5 tabs: Time Patterns, Day Breakdown, Sender Analysis, Daily Distribution, Engagement
+
 ## [1.0.0] - 2024-12-27
 
 ### Added

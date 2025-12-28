@@ -10,6 +10,7 @@ from xobliam.analytics import (
     calculate_open_rate,
     get_busiest_dates,
     get_calendar_distribution,
+    get_day_hourly_breakdown,
     get_day_of_week_distribution,
     get_frequent_senders,
     get_sender_domains,
@@ -32,20 +33,23 @@ def render():
         return
 
     # Tabs for different analytics
-    tab1, tab2, tab3, tab4 = st.tabs(
-        ["Time Patterns", "Sender Analysis", "Daily Distribution", "Engagement"]
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(
+        ["Time Patterns", "Day Breakdown", "Sender Analysis", "Daily Distribution", "Engagement"]
     )
 
     with tab1:
         render_time_patterns(messages)
 
     with tab2:
-        render_sender_analysis(messages)
+        render_day_breakdown(messages)
 
     with tab3:
-        render_daily_distribution(messages)
+        render_sender_analysis(messages)
 
     with tab4:
+        render_daily_distribution(messages)
+
+    with tab5:
         render_engagement(messages)
 
 
@@ -111,6 +115,125 @@ def render_time_patterns(messages: list):
         height=300,
     )
     st.plotly_chart(fig, width="stretch")
+
+
+def render_day_breakdown(messages: list):
+    """Render per-day hourly breakdown with focus mode suggestions."""
+    st.subheader("Daily Hourly Breakdown")
+    st.caption(
+        "See email activity by hour for each day of the week, and find your best focus time."
+    )
+
+    # Day selector
+    day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    selected_day = st.selectbox(
+        "Select a day",
+        day_names,
+        key="day_breakdown_selector",
+    )
+
+    # Get breakdown for selected day
+    breakdown = get_day_hourly_breakdown(messages, day_name=selected_day)
+
+    # Summary metrics
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric(f"Total on {selected_day}s", breakdown["total_emails"])
+
+    with col2:
+        peak_times = breakdown["peak_times"]
+        peak_display = peak_times[0] if peak_times else "N/A"
+        st.metric("Peak Period", peak_display)
+
+    with col3:
+        quiet_times = breakdown["quiet_times"]
+        quiet_display = quiet_times[0] if quiet_times else "N/A"
+        st.metric("Quietest Period", quiet_display)
+
+    # Focus mode suggestion
+    if breakdown["quiet_times"]:
+        st.success(f"🎯 **Focus Mode Suggestion:** {breakdown['focus_mode_suggestion']}")
+    else:
+        st.info("No clear low-traffic periods identified for this day.")
+
+    st.divider()
+
+    # Hourly bar chart
+    st.subheader(f"Hourly Activity on {selected_day}s")
+
+    hourly_counts = breakdown["hourly_counts"]
+    hourly_df = pd.DataFrame({
+        "Hour": [f"{h:02d}:00" for h in range(24)],
+        "Emails": hourly_counts,
+    })
+
+    fig = px.bar(
+        hourly_df,
+        x="Hour",
+        y="Emails",
+        color="Emails",
+        color_continuous_scale="Blues",
+    )
+    fig.update_layout(
+        height=350,
+        xaxis_title="Hour of Day",
+        yaxis_title="Emails",
+        coloraxis_showscale=False,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    # Time blocks table
+    st.subheader("Activity by Time Block")
+
+    blocks_data = []
+    for block in breakdown["blocks"]:
+        status = "🔥 Peak" if block["is_peak"] else ("🌙 Quiet" if block["percentage"] < 10 else "")
+        blocks_data.append({
+            "Time Block": block["label"],
+            "Emails": block["count"],
+            "% of Day": block["percentage"],
+            "Status": status,
+        })
+
+    blocks_df = pd.DataFrame(blocks_data)
+
+    st.dataframe(
+        blocks_df,
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "% of Day": st.column_config.ProgressColumn(
+                min_value=0,
+                max_value=100,
+                format="%.1f%%",
+            ),
+        },
+    )
+
+    # Compare all days
+    st.divider()
+    st.subheader("Compare All Days")
+
+    patterns = analyze_time_patterns(messages)
+    day_totals = patterns["day_totals"]
+
+    compare_df = pd.DataFrame({
+        "Day": day_names,
+        "Total Emails": day_totals,
+    })
+
+    fig2 = px.bar(
+        compare_df,
+        x="Day",
+        y="Total Emails",
+        color="Total Emails",
+        color_continuous_scale="Blues",
+    )
+    fig2.update_layout(height=300, coloraxis_showscale=False)
+    st.plotly_chart(fig2, use_container_width=True)
 
 
 def render_sender_analysis(messages: list):

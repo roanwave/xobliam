@@ -13,10 +13,11 @@ from xobliam.analytics import (
     find_split_candidates,
     generate_recommendations,
     get_label_health_summary,
+    get_label_sender_breakdown,
     get_label_stats,
     suggest_new_labels,
 )
-from xobliam.fetcher import MessageCache
+from xobliam.fetcher import MessageCache, get_label_id_by_name, merge_labels
 
 
 def render():
@@ -36,12 +37,13 @@ def render():
     all_cached_labels = cache.get_cached_labels()
 
     # Tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "Health Summary",
         "All Labels",
+        "Label Details",
         "Coherence",
         "Engagement",
-        "Overlap Analysis",
+        "Overlap & Merge",
     ])
 
     with tab1:
@@ -51,13 +53,16 @@ def render():
         render_all_labels(messages, all_cached_labels)
 
     with tab3:
-        render_coherence(messages)
+        render_label_details(messages, all_cached_labels)
 
     with tab4:
-        render_engagement(messages)
+        render_coherence(messages)
 
     with tab5:
-        render_overlap(messages)
+        render_engagement(messages)
+
+    with tab6:
+        render_overlap_and_merge(messages, cache)
 
 
 def render_health_summary(messages: list, all_cached_labels: list):
@@ -250,6 +255,105 @@ def render_all_labels(messages: list, all_cached_labels: list):
                 st.write(f"- {label['label']}")
 
 
+def render_label_details(messages: list, all_cached_labels: list):
+    """Render label details with sender breakdown."""
+    st.subheader("Label Sender Breakdown")
+    st.caption(
+        "Select a label to see which senders are under it, ranked by volume."
+    )
+
+    # Get all user labels
+    stats = get_label_stats(messages, all_labels=all_cached_labels)
+    all_labels = stats["labels"]
+    user_labels = [l for l in all_labels if not l["is_system"] and l["count"] > 0]
+
+    if not user_labels:
+        st.info("No labels with messages to analyze.")
+        return
+
+    # Label selector
+    label_names = sorted([l["label"] for l in user_labels])
+    selected_label = st.selectbox(
+        "Select a label",
+        label_names,
+        key="label_details_selector",
+    )
+
+    if not selected_label:
+        return
+
+    # Get sender breakdown
+    breakdown = get_label_sender_breakdown(messages, selected_label)
+
+    if not breakdown["senders"]:
+        st.info(f"No messages found for label '{selected_label}'.")
+        return
+
+    # Display label summary
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("Total Emails", breakdown["total_count"])
+
+    with col2:
+        st.metric("Unread", breakdown["unread_count"])
+
+    with col3:
+        st.metric("Read Rate", f"{breakdown['read_rate']:.1f}%")
+
+    with col4:
+        st.metric("Unique Senders", breakdown["unique_senders"])
+
+    st.divider()
+
+    # Sender table
+    st.subheader(f"Senders in '{selected_label}'")
+
+    df_data = []
+    for sender in breakdown["senders"]:
+        df_data.append({
+            "Sender": sender["sender"],
+            "Emails": sender["count"],
+            "Unread": sender["unread"],
+            "Read Rate (%)": sender["read_rate"],
+            "% of Label": sender["percentage"],
+        })
+
+    df = pd.DataFrame(df_data)
+
+    st.dataframe(
+        df,
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "Read Rate (%)": st.column_config.ProgressColumn(
+                min_value=0,
+                max_value=100,
+                format="%.1f%%",
+            ),
+            "% of Label": st.column_config.ProgressColumn(
+                min_value=0,
+                max_value=100,
+                format="%.1f%%",
+            ),
+        },
+    )
+
+    # Top sender chart
+    if len(breakdown["senders"]) > 1:
+        st.divider()
+        top_senders = breakdown["senders"][:15]
+
+        fig = px.bar(
+            x=[s["sender"][:30] for s in top_senders],
+            y=[s["count"] for s in top_senders],
+            labels={"x": "Sender", "y": "Email Count"},
+            title=f"Top Senders in '{selected_label}'",
+        )
+        fig.update_layout(height=400)
+        st.plotly_chart(fig, use_container_width=True)
+
+
 def render_coherence(messages: list):
     """Render label coherence analysis."""
     st.subheader("Label Coherence Analysis")
@@ -407,11 +511,11 @@ def render_engagement(messages: list):
             st.write(f"- **{label}**: {data.get('read_rate', 0):.0f}% read rate, {data.get('count', 0)} emails")
 
 
-def render_overlap(messages: list):
-    """Render label overlap analysis."""
-    st.subheader("Label Overlap Analysis")
+def render_overlap_and_merge(messages: list, cache: MessageCache):
+    """Render label overlap analysis with merge execution."""
+    st.subheader("Label Overlap & Merge")
     st.caption(
-        "Find labels that frequently appear together and may be candidates for merging."
+        "Find labels that frequently appear together and merge them directly."
     )
 
     # Threshold slider
@@ -431,7 +535,131 @@ def render_overlap(messages: list):
 
     st.write(f"Found **{len(overlaps)} overlapping pairs**")
 
-    # Build dataframe
+    # Show merge candidates prominently
+    merge_candidates = [o for o in overlaps if o["action"] == "MERGE"]
+
+    if merge_candidates:
+        st.warning(f"**{len(merge_candidates)} pairs** are near-identical and can be merged:")
+
+        for i, overlap in enumerate(merge_candidates):
+            label_a = overlap["label_a"]
+            label_b = overlap["label_b"]
+            overlap_pct = overlap["overlap_rate"]
+
+            with st.expander(
+                f"**{label_a}** + **{label_b}** ({overlap_pct:.0f}% overlap)"
+            ):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric(label_a, f"{overlap['count_a']} emails")
+                with col2:
+                    st.metric(label_b, f"{overlap['count_b']} emails")
+                with col3:
+                    st.metric("Shared", f"{overlap['overlap_count']} emails")
+
+                st.divider()
+
+                # Merge options
+                st.write("**Merge Options:**")
+
+                # Direction selection
+                merge_key = f"merge_dir_{i}"
+                merge_direction = st.radio(
+                    "Keep which label?",
+                    [label_a, label_b],
+                    key=merge_key,
+                    horizontal=True,
+                )
+
+                if merge_direction == label_a:
+                    source_label = label_b
+                    target_label = label_a
+                else:
+                    source_label = label_a
+                    target_label = label_b
+
+                delete_source = st.checkbox(
+                    f"Delete '{source_label}' after merge",
+                    key=f"delete_source_{i}",
+                    value=True,
+                )
+
+                st.info(
+                    f"This will move all emails from **{source_label}** to **{target_label}**"
+                    + (f" and delete the '{source_label}' label." if delete_source else ".")
+                )
+
+                # Merge button with confirmation
+                col_btn1, col_btn2 = st.columns([1, 3])
+
+                with col_btn1:
+                    if st.button("🔀 Merge Now", key=f"merge_btn_{i}", type="primary"):
+                        st.session_state[f"confirm_merge_{i}"] = True
+
+                # Confirmation dialog
+                if st.session_state.get(f"confirm_merge_{i}", False):
+                    st.warning(
+                        f"⚠️ **Confirm merge?**\n\n"
+                        f"This will:\n"
+                        f"1. Add '{target_label}' to all emails in '{source_label}'\n"
+                        f"2. Remove '{source_label}' from those emails\n"
+                        + (f"3. Delete the '{source_label}' label entirely\n\n" if delete_source else "\n")
+                        + "**This cannot be undone.**"
+                    )
+
+                    col_conf1, col_conf2, col_conf3 = st.columns([1, 1, 2])
+
+                    with col_conf1:
+                        if st.button("✅ Yes, Merge", key=f"confirm_yes_{i}", type="primary"):
+                            # Execute merge
+                            source_id = get_label_id_by_name(source_label, cache=cache)
+                            target_id = get_label_id_by_name(target_label, cache=cache)
+
+                            if not source_id or not target_id:
+                                st.error("Could not find label IDs. Try refreshing data.")
+                            else:
+                                with st.spinner(f"Merging '{source_label}' into '{target_label}'..."):
+                                    progress_bar = st.progress(0)
+                                    status_text = st.empty()
+
+                                    def update_progress(current, total):
+                                        progress_bar.progress(min(1.0, current / total))
+                                        status_text.text(f"Processing {current}/{total} emails...")
+
+                                    result = merge_labels(
+                                        source_label_id=source_id,
+                                        target_label_id=target_id,
+                                        delete_source=delete_source,
+                                        cache=cache,
+                                        progress_callback=update_progress,
+                                    )
+
+                                    progress_bar.empty()
+                                    status_text.empty()
+
+                                if result["success"]:
+                                    st.success(
+                                        f"✅ Merged successfully!\n\n"
+                                        f"- {result['messages_modified']} emails updated\n"
+                                        + (f"- '{source_label}' label deleted" if result.get("source_deleted") else "")
+                                    )
+                                    st.info("Refresh data to see updated labels.")
+                                else:
+                                    st.error(f"Merge failed: {result.get('error', 'Unknown error')}")
+
+                            st.session_state[f"confirm_merge_{i}"] = False
+                            st.rerun()
+
+                    with col_conf2:
+                        if st.button("❌ Cancel", key=f"confirm_no_{i}"):
+                            st.session_state[f"confirm_merge_{i}"] = False
+                            st.rerun()
+
+    st.divider()
+
+    # Full overlap table
+    st.subheader("All Overlapping Pairs")
+
     df_data = []
     for overlap in overlaps:
         df_data.append({
@@ -446,28 +674,6 @@ def render_overlap(messages: list):
 
     df = pd.DataFrame(df_data)
 
-    # Show merge candidates prominently
-    merge_candidates = df[df["Action"] == "MERGE"]
-    if not merge_candidates.empty:
-        st.warning(f"**{len(merge_candidates)} pairs** are near-identical and should be merged:")
-
-        for _, row in merge_candidates.iterrows():
-            with st.expander(
-                f"**{row['Label A']}** + **{row['Label B']}** ({row['Overlap %']:.0f}% overlap)"
-            ):
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric(row["Label A"], f"{row['A Count']} emails")
-                with col2:
-                    st.metric(row["Label B"], f"{row['B Count']} emails")
-                with col3:
-                    st.metric("Shared", f"{row['Shared Emails']} emails")
-                st.info(f"Recommendation: Merge these labels (they share {row['Overlap %']:.0f}% of emails)")
-
-    st.divider()
-
-    # Full table
-    st.subheader("All Overlapping Pairs")
     st.dataframe(
         df,
         width="stretch",

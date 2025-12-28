@@ -211,3 +211,88 @@ def get_quiet_times(
 
     sorted_slots = sorted(slots, key=lambda x: x["count"])
     return sorted_slots[:top_n]
+
+
+def get_day_hourly_breakdown(
+    messages: list[dict[str, Any]],
+    day_name: str | None = None,
+    day_index: int | None = None,
+) -> dict[str, Any]:
+    """
+    Get hourly breakdown for a specific day of the week.
+
+    Args:
+        messages: List of message dictionaries.
+        day_name: Day name (e.g., "Friday"). Used if day_index not provided.
+        day_index: Day index (0=Monday, 6=Sunday).
+
+    Returns:
+        Dictionary with hourly breakdown and focus mode recommendations.
+    """
+    day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+    # Resolve day index
+    if day_index is None:
+        if day_name:
+            day_name_lower = day_name.lower()
+            for i, name in enumerate(day_names):
+                if name.lower() == day_name_lower:
+                    day_index = i
+                    break
+        if day_index is None:
+            # Default to busiest day
+            patterns = analyze_time_patterns(messages)
+            day_index = patterns["peak_slot"][0]
+
+    # Get hourly counts for this day
+    patterns = analyze_time_patterns(messages)
+    hourly_counts = patterns["matrix"][day_index]
+    total_for_day = sum(hourly_counts)
+
+    # Group into time blocks
+    time_blocks = [
+        {"label": "12am - 6am", "start": 0, "end": 6},
+        {"label": "6am - 9am", "start": 6, "end": 9},
+        {"label": "9am - 12pm", "start": 9, "end": 12},
+        {"label": "12pm - 3pm", "start": 12, "end": 15},
+        {"label": "3pm - 6pm", "start": 15, "end": 18},
+        {"label": "6pm - 9pm", "start": 18, "end": 21},
+        {"label": "9pm - 12am", "start": 21, "end": 24},
+    ]
+
+    blocks = []
+    max_count = 0
+    for block in time_blocks:
+        count = sum(hourly_counts[block["start"]:block["end"]])
+        max_count = max(max_count, count)
+        blocks.append({
+            "label": block["label"],
+            "start_hour": block["start"],
+            "end_hour": block["end"],
+            "count": count,
+        })
+
+    # Add percentage and visual bars
+    for block in blocks:
+        block["percentage"] = round((block["count"] / total_for_day) * 100, 1) if total_for_day > 0 else 0
+        block["bar_width"] = round((block["count"] / max_count) * 10) if max_count > 0 else 0
+        block["is_peak"] = block["count"] == max_count and max_count > 0
+
+    # Find quiet hours for focus mode recommendations
+    quiet_blocks = [b for b in blocks if b["count"] < (max_count * 0.3)]
+    quiet_times = [b["label"] for b in quiet_blocks]
+
+    # Find peak hours
+    peak_blocks = [b for b in blocks if b["is_peak"] or b["count"] >= (max_count * 0.8)]
+    peak_times = [b["label"] for b in peak_blocks]
+
+    return {
+        "day_name": day_names[day_index],
+        "day_index": day_index,
+        "total_emails": total_for_day,
+        "blocks": blocks,
+        "hourly_counts": hourly_counts,
+        "quiet_times": quiet_times,
+        "peak_times": peak_times,
+        "focus_mode_suggestion": f"Low traffic: {', '.join(quiet_times)}" if quiet_times else "No clear quiet periods",
+    }

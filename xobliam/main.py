@@ -14,9 +14,11 @@ from xobliam.analytics import (
     calculate_open_rate,
     find_redundant_labels,
     generate_recommendations,
+    get_day_hourly_breakdown,
     get_day_of_week_distribution,
     get_frequent_senders,
     get_label_health_summary,
+    get_label_sender_breakdown,
     get_label_stats,
     suggest_new_labels,
 )
@@ -33,6 +35,7 @@ from xobliam.ui.cli import (
     create_progress,
     print_category_breakdown,
     print_coherence_analysis,
+    print_day_hourly_breakdown,
     print_deletion_candidates,
     print_deletion_summary,
     print_engagement_efficiency,
@@ -40,6 +43,7 @@ from xobliam.ui.cli import (
     print_header,
     print_info,
     print_label_health_summary,
+    print_label_sender_breakdown,
     print_label_stats,
     print_new_label_suggestions,
     print_recommendations,
@@ -56,7 +60,7 @@ load_dotenv()
 
 
 @click.group()
-@click.version_option(version="1.0.0")
+@click.version_option(version="1.1.0")
 def cli():
     """xobliam - Gmail analytics dashboard with intelligent cleanup."""
     pass
@@ -73,7 +77,8 @@ def ui():
 
 @cli.command()
 @click.option("--days", default=90, help="Number of days to analyze")
-def stats(days: int):
+@click.option("--day", default=None, help="Show hourly breakdown for a specific day (e.g., Friday)")
+def stats(days: int, day: str | None):
     """Show quick email statistics."""
     print_header("xobliam - Email Statistics")
 
@@ -87,6 +92,18 @@ def stats(days: int):
 
     if not messages:
         print_error("No messages found. Run 'xobliam fetch' first.")
+        return
+
+    # If --day is specified, show only the hourly breakdown for that day
+    if day:
+        valid_days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+        if day.lower() not in valid_days:
+            print_error(f"Invalid day '{day}'. Use: {', '.join(d.title() for d in valid_days)}")
+            return
+
+        print_info(f"Analyzing {len(messages)} messages from last {days} days\n")
+        breakdown = get_day_hourly_breakdown(messages, day_name=day)
+        print_day_hourly_breakdown(breakdown)
         return
 
     print_info(f"Analyzing {len(messages)} messages from last {days} days\n")
@@ -110,6 +127,7 @@ def stats(days: int):
     dow = get_day_of_week_distribution(messages)
     print_info(f"Busiest day: {dow['busiest_day']} ({dow['busiest_count']} emails)")
     print_info(f"Quietest day: {dow['quietest_day']} ({dow['quietest_count']} emails)")
+    print_info("Use --day <day> to see hourly breakdown for a specific day")
 
 
 @cli.command()
@@ -285,7 +303,8 @@ def delete_cmd(dry_run: bool, execute: bool, min_score: int, confirm: bool, limi
 @click.option("--days", default=90, help="Number of days to analyze")
 @click.option("--show-system", is_flag=True, help="Include system labels in output")
 @click.option("--full", is_flag=True, help="Show full analysis (coherence, engagement)")
-def labels(days: int, show_system: bool, full: bool):
+@click.option("--label", default=None, help="Show sender breakdown for a specific label")
+def labels(days: int, show_system: bool, full: bool, label: str | None):
     """Analyze labels and show optimization recommendations."""
     print_header("Label Optimization Analysis")
 
@@ -298,6 +317,16 @@ def labels(days: int, show_system: bool, full: bool):
 
     # Get all labels from cache (including abandoned ones with 0 messages)
     all_labels = cache.get_cached_labels()
+
+    # If --label is specified, show only the sender breakdown for that label
+    if label:
+        print_info(f"Analyzing {len(messages)} messages from last {days} days\n")
+        breakdown = get_label_sender_breakdown(messages, label)
+        if not breakdown["senders"]:
+            print_error(f"No messages found for label '{label}'.")
+            return
+        print_label_sender_breakdown(breakdown)
+        return
 
     print_info(f"Analyzing {len(messages)} messages from last {days} days...\n")
 
@@ -333,6 +362,8 @@ def labels(days: int, show_system: bool, full: bool):
     suggestions = suggest_new_labels(messages)
     if suggestions:
         print_new_label_suggestions(suggestions)
+
+    print_info("Use --label <name> to see sender breakdown for a specific label")
 
 
 @cli.command()
