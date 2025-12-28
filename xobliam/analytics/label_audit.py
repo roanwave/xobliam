@@ -894,11 +894,15 @@ def get_label_sender_breakdown(
         read_count = count - unread
         read_rate = round((read_count / count) * 100, 1) if count > 0 else 0
 
+        # Calculate percentage of label
+        percentage = round((count / total_count) * 100, 1) if total_count > 0 else 0
+
         senders.append({
             "sender": sender,
             "count": count,
             "unread": unread,
             "read_rate": read_rate,
+            "percentage": percentage,
             "sample_subjects": data["subjects"],
         })
 
@@ -908,10 +912,10 @@ def get_label_sender_breakdown(
     total_read_rate = round(((total_count - total_unread) / total_count) * 100, 1) if total_count > 0 else 0
 
     return {
-        "label": label_name,
+        "label_name": label_name,
         "total_count": total_count,
-        "total_unread": total_unread,
-        "total_read_rate": total_read_rate,
+        "unread_count": total_unread,
+        "read_rate": total_read_rate,
         "unique_senders": len(senders),
         "senders": senders,
     }
