@@ -217,17 +217,17 @@ def delete_cmd(dry_run: bool, execute: bool, min_score: int, confirm: bool, limi
         print_error("No messages found. Run 'xobliam fetch' first.")
         return
 
-    # Find candidates
-    print_info(f"Finding candidates with score >= {min_score}...")
+    # Show summary first (includes unlabeled count)
+    summary = get_deletion_summary(messages)
+    print_deletion_summary(summary)
+
+    # Find candidates (only considers unlabeled emails)
     candidates = find_deletion_candidates(messages, min_score=min_score)
 
     if not candidates:
-        print_info("No deletion candidates found matching criteria.")
+        print_info(f"No candidates with score >= {min_score} found.")
         return
 
-    # Show summary
-    summary = get_deletion_summary(messages)
-    print_deletion_summary(summary)
     console.print()
 
     # Show top candidates

@@ -5,6 +5,58 @@ from typing import Any
 from .safety_scorer import calculate_safety_score, get_score_breakdown
 
 
+# System labels that don't count as "user labels"
+# Messages with ONLY these labels are eligible for smart delete
+SYSTEM_LABELS = {
+    "INBOX",
+    "UNREAD",
+    "SENT",
+    "DRAFT",
+    "SPAM",
+    "TRASH",
+    "STARRED",
+    "IMPORTANT",
+    "CATEGORY_PERSONAL",
+    "CATEGORY_SOCIAL",
+    "CATEGORY_PROMOTIONS",
+    "CATEGORY_UPDATES",
+    "CATEGORY_FORUMS",
+}
+
+
+def has_user_labels(message: dict[str, Any]) -> bool:
+    """
+    Check if a message has any user-created labels.
+
+    Args:
+        message: Message dictionary with 'labels' field.
+
+    Returns:
+        True if the message has at least one user label.
+    """
+    labels = message.get("labels", [])
+    for label in labels:
+        if label not in SYSTEM_LABELS:
+            return True
+    return False
+
+
+def filter_unlabeled_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Filter messages to only those without user labels.
+
+    Smart Delete only considers emails that haven't been intentionally
+    organized by the user. If you've labeled an email, we won't touch it.
+
+    Args:
+        messages: List of message dictionaries.
+
+    Returns:
+        Messages that have no user-created labels.
+    """
+    return [msg for msg in messages if not has_user_labels(msg)]
+
+
 # Safety tiers
 SAFETY_TIERS = {
     "very_safe": {"min": 90, "max": 100, "color": "green", "label": "Very Safe"},
@@ -46,6 +98,9 @@ def find_deletion_candidates(
     """
     Find messages that are candidates for deletion.
 
+    Only considers messages WITHOUT user labels. If you've intentionally
+    organized an email with a label, Smart Delete won't touch it.
+
     Args:
         messages: List of message dictionaries.
         user_context: User context for scoring.
@@ -55,9 +110,12 @@ def find_deletion_candidates(
     Returns:
         List of candidates sorted by score (highest first).
     """
+    # Filter to only unlabeled messages
+    unlabeled = filter_unlabeled_messages(messages)
+
     candidates = []
 
-    for msg in messages:
+    for msg in unlabeled:
         score = calculate_safety_score(msg, user_context)
 
         if score >= min_score:
@@ -121,6 +179,8 @@ def get_deletion_summary(
     """
     Get a summary of deletion candidates by tier.
 
+    Only considers messages WITHOUT user labels.
+
     Args:
         messages: List of message dictionaries.
         user_context: User context for scoring.
@@ -128,15 +188,19 @@ def get_deletion_summary(
     Returns:
         Dictionary with tier counts and totals.
     """
+    # Filter to only unlabeled messages
+    unlabeled = filter_unlabeled_messages(messages)
+
     tier_counts = {tier: 0 for tier in SAFETY_TIERS}
 
-    for msg in messages:
+    for msg in unlabeled:
         score = calculate_safety_score(msg, user_context)
         tier = get_safety_tier(score)
         tier_counts[tier["name"]] += 1
 
     return {
         "total_messages": len(messages),
+        "unlabeled_count": len(unlabeled),
         "tier_counts": tier_counts,
         "deletable": tier_counts.get("very_safe", 0) + tier_counts.get("likely_safe", 0),
         "needs_review": tier_counts.get("review", 0),
@@ -181,6 +245,8 @@ def get_bulk_delete_recommendations(
     """
     Find senders whose emails can be bulk deleted.
 
+    Only considers messages WITHOUT user labels.
+
     Args:
         messages: List of message dictionaries.
         user_context: User context for scoring.
@@ -190,9 +256,12 @@ def get_bulk_delete_recommendations(
     Returns:
         List of sender recommendations for bulk deletion.
     """
+    # Filter to only unlabeled messages
+    unlabeled = filter_unlabeled_messages(messages)
+
     sender_scores: dict[str, list[int]] = {}
 
-    for msg in messages:
+    for msg in unlabeled:
         sender = msg.get("sender", "")
         score = calculate_safety_score(msg, user_context)
         if sender not in sender_scores:
@@ -224,6 +293,8 @@ def estimate_cleanup_impact(
     """
     Estimate the impact of cleanup at different score thresholds.
 
+    Only considers messages WITHOUT user labels.
+
     Args:
         messages: List of message dictionaries.
         user_context: User context for scoring.
@@ -232,6 +303,9 @@ def estimate_cleanup_impact(
     Returns:
         Dictionary with impact at different thresholds.
     """
+    # Filter to only unlabeled messages
+    unlabeled = filter_unlabeled_messages(messages)
+
     thresholds = [90, 80, 70, 60, 50]
     impacts = {}
 
@@ -239,13 +313,14 @@ def estimate_cleanup_impact(
         candidates = find_deletion_candidates(messages, user_context, min_score=threshold)
         impacts[threshold] = {
             "count": len(candidates),
-            "percentage": round((len(candidates) / len(messages)) * 100, 2)
-            if messages
+            "percentage": round((len(candidates) / len(unlabeled)) * 100, 2)
+            if unlabeled
             else 0.0,
         }
 
     return {
         "total_messages": len(messages),
+        "unlabeled_count": len(unlabeled),
         "impacts_by_threshold": impacts,
         "recommended_threshold": 70,
     }

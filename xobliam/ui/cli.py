@@ -152,6 +152,14 @@ def print_deletion_candidates(
 def print_deletion_summary(summary: dict[str, Any]) -> None:
     """Print deletion summary."""
     tier_counts = summary.get("tier_counts", {})
+    unlabeled_count = summary.get("unlabeled_count", 0)
+    total_messages = summary.get("total_messages", 0)
+
+    # Show unlabeled filter info
+    console.print(
+        f"\n[blue]ℹ[/blue] Analyzing [bold]{unlabeled_count:,}[/bold] unlabeled emails "
+        f"(of {total_messages:,} total). Labeled emails are protected.\n"
+    )
 
     table = Table(title="Deletion Summary")
     table.add_column("Tier", style="cyan")

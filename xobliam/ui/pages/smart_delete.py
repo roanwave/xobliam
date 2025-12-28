@@ -7,6 +7,7 @@ from xobliam.fetcher import MessageCache
 from xobliam.smart_delete import (
     calculate_safety_score,
     delete_messages,
+    filter_unlabeled_messages,
     find_deletion_candidates,
     get_bulk_delete_recommendations,
     get_deletion_summary,
@@ -30,6 +31,12 @@ def render():
 
     # Summary
     summary = get_deletion_summary(messages)
+    unlabeled_count = summary.get("unlabeled_count", 0)
+
+    st.info(
+        f"Analyzing **{unlabeled_count:,} unlabeled emails** for safe deletion. "
+        f"Emails you've organized with labels are protected."
+    )
 
     st.subheader("Deletion Summary")
 
