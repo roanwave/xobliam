@@ -89,7 +89,7 @@ def main():
 
     # About
     st.sidebar.caption(
-        "xobliam v0.1.0\n\n"
+        "xobliam v1.0.0\n\n"
         "Gmail analytics with intelligent cleanup recommendations."
     )
 
