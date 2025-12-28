@@ -306,24 +306,52 @@ def _find_common_words(subjects: list[str], min_occurrence: int = 3) -> list[str
     ]
 
 
-def get_label_stats(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def get_label_stats(messages: list[dict[str, Any]]) -> dict[str, Any]:
     """
-    Get statistics for each label.
+    Get statistics for each label including usage counts and percentages.
 
     Args:
         messages: List of message dictionaries.
 
     Returns:
-        List of label statistics.
+        Dictionary with:
+        - labels: List of label statistics (count, percentage, read_rate, unique_senders)
+        - total_messages: Total number of messages analyzed
+        - unlabeled_count: Number of messages with no user labels
+        - unlabeled_percentage: Percentage of unlabeled messages
     """
+    system_labels = {
+        "INBOX",
+        "SENT",
+        "DRAFT",
+        "SPAM",
+        "TRASH",
+        "UNREAD",
+        "STARRED",
+        "IMPORTANT",
+        "CATEGORY_PERSONAL",
+        "CATEGORY_SOCIAL",
+        "CATEGORY_PROMOTIONS",
+        "CATEGORY_UPDATES",
+        "CATEGORY_FORUMS",
+    }
+
     label_data: dict[str, dict] = defaultdict(
         lambda: {"count": 0, "unread": 0, "senders": set()}
     )
+
+    total_messages = len(messages)
+    unlabeled_count = 0
 
     for msg in messages:
         labels = msg.get("labels", [])
         sender = msg.get("sender", "")
         is_unread = msg.get("is_unread", False)
+
+        # Check if message has any user labels
+        user_labels = [l for l in labels if l not in system_labels]
+        if not user_labels:
+            unlabeled_count += 1
 
         for label in labels:
             label_data[label]["count"] += 1
@@ -341,12 +369,25 @@ def get_label_stats(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             {
                 "label": label,
                 "count": count,
+                "percentage": round((count / total_messages) * 100, 2)
+                if total_messages > 0
+                else 0.0,
                 "unread": unread,
                 "read_rate": round(((count - unread) / count) * 100, 2)
                 if count > 0
                 else 0.0,
                 "unique_senders": unique_senders,
+                "is_system": label in system_labels,
             }
         )
 
-    return sorted(results, key=lambda x: x["count"], reverse=True)
+    sorted_labels = sorted(results, key=lambda x: x["count"], reverse=True)
+
+    return {
+        "labels": sorted_labels,
+        "total_messages": total_messages,
+        "unlabeled_count": unlabeled_count,
+        "unlabeled_percentage": round((unlabeled_count / total_messages) * 100, 2)
+        if total_messages > 0
+        else 0.0,
+    }

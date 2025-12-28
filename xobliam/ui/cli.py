@@ -166,17 +166,29 @@ def print_deletion_summary(summary: dict[str, Any]) -> None:
     console.print(f"\nTotal deletable: [green]{summary.get('deletable', 0)}[/green]")
 
 
-def print_label_stats(labels: list[dict[str, Any]], limit: int = 15) -> None:
+def print_label_stats(stats: dict[str, Any], limit: int = 15) -> None:
     """Print label statistics."""
+    # Print summary
+    console.print(f"Total messages: [green]{stats['total_messages']:,}[/green]")
+    console.print(
+        f"Unlabeled: [yellow]{stats['unlabeled_count']:,}[/yellow] "
+        f"({stats['unlabeled_percentage']:.1f}%)"
+    )
+    console.print()
+
+    # Print label table
     table = Table(title="Label Statistics")
     table.add_column("Label", style="cyan", max_width=30)
     table.add_column("Count", justify="right", style="green")
+    table.add_column("%", justify="right", style="dim")
     table.add_column("Read Rate", justify="right", style="yellow")
 
+    labels = stats.get("labels", [])
     for label in labels[:limit]:
         table.add_row(
             label.get("label", "")[:30],
             str(label.get("count", 0)),
+            f"{label.get('percentage', 0):.1f}%",
             f"{label.get('read_rate', 0):.1f}%",
         )
 

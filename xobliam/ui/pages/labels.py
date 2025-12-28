@@ -44,19 +44,31 @@ def render_overview(messages: list):
     st.subheader("Label Distribution")
 
     stats = get_label_stats(messages)
+    all_labels = stats["labels"]
+
+    # Show unlabeled stats
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Total Messages", f"{stats['total_messages']:,}")
+    with col2:
+        st.metric(
+            "Unlabeled",
+            f"{stats['unlabeled_count']:,}",
+            f"{stats['unlabeled_percentage']:.1f}%",
+        )
+
+    st.divider()
 
     # Filter to user labels and significant counts
     user_labels = [
-        s for s in stats
-        if not s["label"].startswith("CATEGORY_")
-        and s["label"] not in ("INBOX", "SENT", "DRAFT", "SPAM", "TRASH", "UNREAD", "STARRED", "IMPORTANT")
-        and s["count"] > 0
+        s for s in all_labels
+        if not s["is_system"] and s["count"] > 0
     ]
 
     if not user_labels:
         st.info("No user-created labels found in your messages.")
         # Show system labels instead
-        system_labels = [s for s in stats if s["count"] > 10]
+        system_labels = [s for s in all_labels if s["count"] > 10]
         if system_labels:
             st.subheader("System Labels")
             df = pd.DataFrame(system_labels[:20])
