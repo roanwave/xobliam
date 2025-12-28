@@ -181,7 +181,7 @@ def render_day_breakdown(messages: list):
         yaxis_title="Emails",
         coloraxis_showscale=False,
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     st.divider()
 
@@ -233,7 +233,7 @@ def render_day_breakdown(messages: list):
         color_continuous_scale="Blues",
     )
     fig2.update_layout(height=300, coloraxis_showscale=False)
-    st.plotly_chart(fig2, use_container_width=True)
+    st.plotly_chart(fig2, width="stretch")
 
 
 def render_sender_analysis(messages: list):

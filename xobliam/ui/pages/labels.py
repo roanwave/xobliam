@@ -362,7 +362,7 @@ def render_label_details(messages: list, all_cached_labels: list):
             title=f"Top Senders in '{selected_label}'",
         )
         fig.update_layout(height=400)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
 
 def render_coherence(messages: list):
