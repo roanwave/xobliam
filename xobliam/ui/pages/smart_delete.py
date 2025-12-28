@@ -86,7 +86,9 @@ def render():
 
 
 def render_candidates(messages: list):
-    """Render deletion candidates."""
+    """Render deletion candidates grouped by sender."""
+    from collections import defaultdict
+
     st.subheader("Deletion Candidates")
 
     # Filters
@@ -102,7 +104,7 @@ def render_candidates(messages: list):
         )
 
     with col3:
-        limit = st.selectbox("Show", [50, 100, 200, 500], index=0)
+        view_mode = st.selectbox("View", ["Grouped by Sender", "Flat List"])
 
     # Get candidates
     candidates = find_deletion_candidates(messages, min_score=min_score)
@@ -119,47 +121,93 @@ def render_candidates(messages: list):
         st.info("No candidates matching your criteria.")
         return
 
-    st.write(f"Found {len(candidates)} candidates")
+    st.write(f"Found **{len(candidates)}** candidates")
 
-    # Prepare dataframe
-    df_data = []
-    for c in candidates[:limit]:
-        tier = c.get("tier", {})
-        df_data.append({
-            "Score": c["score"],
-            "Tier": tier.get("label", ""),
-            "From": c.get("sender", "")[:40],
-            "Subject": (c.get("subject", "") or "")[:50],
-            "Date": c.get("date", "")[:10],
-            "message_id": c.get("message_id"),
-        })
+    if view_mode == "Flat List":
+        # Original flat dataframe view
+        df_data = []
+        for c in candidates[:500]:
+            tier = c.get("tier", {})
+            df_data.append({
+                "Score": c["score"],
+                "Tier": tier.get("label", ""),
+                "From": c.get("sender", "")[:40],
+                "Subject": (c.get("subject", "") or "")[:50],
+                "Date": c.get("date", "")[:10],
+            })
 
-    df = pd.DataFrame(df_data)
+        df = pd.DataFrame(df_data)
+        st.dataframe(
+            df,
+            width="stretch",
+            hide_index=True,
+            height=400,
+        )
+    else:
+        # Grouped by sender view
+        by_sender: dict[str, list[dict]] = defaultdict(list)
+        for c in candidates:
+            sender = c.get("sender", "unknown")
+            by_sender[sender].append(c)
 
-    # Color code by tier
-    def color_score(val):
-        if val >= 90:
-            return "background-color: #c6efce"
-        elif val >= 70:
-            return "background-color: #ffeb9c"
-        elif val >= 50:
-            return "background-color: #ffc7ce"
-        return ""
+        # Sort by count
+        sorted_senders = sorted(by_sender.items(), key=lambda x: len(x[1]), reverse=True)
 
-    st.dataframe(
-        df[["Score", "Tier", "From", "Subject", "Date"]],
-        width="stretch",
-        hide_index=True,
-        height=400,
-    )
+        st.write(f"From **{len(sorted_senders)}** unique senders")
+        st.divider()
+
+        for sender, sender_candidates in sorted_senders:
+            avg_score = sum(c.get("score", 0) for c in sender_candidates) / len(sender_candidates)
+            count = len(sender_candidates)
+
+            # Determine tier color
+            if avg_score >= 90:
+                tier_emoji = "🟢"
+            elif avg_score >= 70:
+                tier_emoji = "🟡"
+            else:
+                tier_emoji = "🟠"
+
+            # Sample subjects for preview
+            sample_subjects = [
+                (c.get("subject", "") or "(no subject)")[:40]
+                for c in sender_candidates[:3]
+            ]
+            preview = ", ".join(f'"{s}"' for s in sample_subjects)
+            if count > 3:
+                preview += f" ... +{count - 3} more"
+
+            with st.expander(
+                f"{tier_emoji} **{sender}** — {count} emails (avg score: {avg_score:.0f})"
+            ):
+                st.caption(f"Preview: {preview}")
+                st.divider()
+
+                # Show all emails from this sender
+                sender_df = pd.DataFrame([
+                    {
+                        "Score": c["score"],
+                        "Subject": (c.get("subject", "") or "")[:60],
+                        "Date": c.get("date", "")[:10],
+                    }
+                    for c in sender_candidates
+                ])
+
+                st.dataframe(
+                    sender_df,
+                    width="stretch",
+                    hide_index=True,
+                    height=min(200, 35 * len(sender_candidates) + 40),
+                )
 
     # Score breakdown for selected email
+    st.divider()
     st.subheader("Score Breakdown")
 
     if candidates:
         selected_idx = st.selectbox(
             "Select email to analyze",
-            range(min(len(candidates), limit)),
+            range(min(len(candidates), 100)),
             format_func=lambda i: f"{candidates[i]['sender'][:30]} - {(candidates[i].get('subject', '') or '')[:40]}",
         )
 
@@ -226,7 +274,9 @@ def render_bulk_recommendations(messages: list):
 
 
 def render_execution(messages: list, cache: MessageCache):
-    """Render deletion execution interface."""
+    """Render deletion execution interface with sender selection."""
+    from collections import defaultdict
+
     st.subheader("Execute Deletion")
 
     st.warning(
@@ -242,33 +292,67 @@ def render_execution(messages: list, cache: MessageCache):
         st.info(f"No emails with safety score >= {min_score}")
         return
 
-    st.write(f"**{len(candidates)} emails** ready for deletion")
+    # Group by sender
+    by_sender: dict[str, list[dict]] = defaultdict(list)
+    for c in candidates:
+        sender = c.get("sender", "unknown")
+        by_sender[sender].append(c)
 
-    # Limit
-    max_delete = st.number_input(
-        "Maximum to delete",
-        min_value=1,
-        max_value=len(candidates),
-        value=min(100, len(candidates)),
-    )
+    sorted_senders = sorted(by_sender.items(), key=lambda x: len(x[1]), reverse=True)
 
-    # Preview
-    st.subheader("Preview")
+    st.write(f"**{len(candidates)} emails** from **{len(sorted_senders)} senders** ready for deletion")
 
-    preview = candidates[:10]
-    preview_df = pd.DataFrame([
-        {
-            "Score": c["score"],
-            "From": c.get("sender", "")[:30],
-            "Subject": (c.get("subject", "") or "")[:40],
-        }
-        for c in preview
-    ])
+    st.divider()
 
-    st.dataframe(preview_df, width="stretch", hide_index=True)
+    # Select/deselect all
+    col1, col2 = st.columns(2)
+    with col1:
+        select_all = st.checkbox("Select all senders", value=True, key="select_all")
 
-    if len(candidates) > 10:
-        st.caption(f"...and {len(candidates) - 10} more")
+    # Sender selection with checkboxes
+    st.subheader("Select Senders to Delete")
+
+    selected_message_ids = []
+
+    for sender, sender_candidates in sorted_senders:
+        avg_score = sum(c.get("score", 0) for c in sender_candidates) / len(sender_candidates)
+        count = len(sender_candidates)
+
+        # Determine tier color
+        if avg_score >= 90:
+            tier_emoji = "🟢"
+        elif avg_score >= 70:
+            tier_emoji = "🟡"
+        else:
+            tier_emoji = "🟠"
+
+        # Sample subjects
+        sample_subjects = [(c.get("subject", "") or "(no subject)")[:30] for c in sender_candidates[:2]]
+        preview = ", ".join(f'"{s}"' for s in sample_subjects)
+        if count > 2:
+            preview += f" +{count - 2} more"
+
+        # Checkbox for this sender
+        sender_key = f"sender_{sender[:50]}"
+        is_selected = st.checkbox(
+            f"{tier_emoji} **{sender}** — {count} emails (avg: {avg_score:.0f})",
+            value=select_all,
+            key=sender_key,
+            help=preview,
+        )
+
+        if is_selected:
+            selected_message_ids.extend([c["message_id"] for c in sender_candidates])
+
+    st.divider()
+
+    # Summary of selection
+    selected_count = len(selected_message_ids)
+    st.write(f"**Selected:** {selected_count} emails")
+
+    if selected_count == 0:
+        st.info("Select at least one sender to proceed.")
+        return
 
     st.divider()
 
@@ -276,12 +360,10 @@ def render_execution(messages: list, cache: MessageCache):
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("Dry Run", width="stretch"):
-            message_ids = [c["message_id"] for c in candidates[:max_delete]]
-
+        if st.button("Dry Run", use_container_width=True):
             with st.spinner("Simulating deletion..."):
                 result = delete_messages(
-                    message_ids,
+                    selected_message_ids,
                     cache=cache,
                     dry_run=True,
                 )
@@ -296,12 +378,10 @@ def render_execution(messages: list, cache: MessageCache):
 
         if st.button(
             "Delete Emails",
-            width="stretch",
+            use_container_width=True,
             type="primary",
             disabled=not confirm,
         ):
-            message_ids = [c["message_id"] for c in candidates[:max_delete]]
-
             progress_bar = st.progress(0)
             status_text = st.empty()
 
@@ -311,7 +391,7 @@ def render_execution(messages: list, cache: MessageCache):
 
             with st.spinner("Deleting emails..."):
                 result = delete_messages(
-                    message_ids,
+                    selected_message_ids,
                     cache=cache,
                     dry_run=False,
                     progress_callback=update_progress,

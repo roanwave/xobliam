@@ -202,7 +202,8 @@ def export(output: str, days: int):
 @click.option("--min-score", default=80, help="Minimum safety score (0-100)")
 @click.option("--confirm", is_flag=True, help="Skip confirmation prompt")
 @click.option("--limit", default=100, help="Maximum messages to delete")
-def delete_cmd(dry_run: bool, execute: bool, min_score: int, confirm: bool, limit: int):
+@click.option("--expand", is_flag=True, help="Show all emails ungrouped (flat list)")
+def delete_cmd(dry_run: bool, execute: bool, min_score: int, confirm: bool, limit: int, expand: bool):
     """Find and delete safe emails."""
     print_header("Smart Delete")
 
@@ -230,13 +231,18 @@ def delete_cmd(dry_run: bool, execute: bool, min_score: int, confirm: bool, limi
 
     console.print()
 
-    # Show top candidates
-    print_deletion_candidates(candidates, limit=20)
+    # Show candidates - grouped by default, flat with --expand
+    if expand:
+        print_deletion_candidates(candidates, limit=len(candidates))
+    else:
+        from xobliam.ui.cli import print_deletion_candidates_grouped
+        print_deletion_candidates_grouped(candidates)
+
     console.print()
 
     # Limit candidates
     to_delete = candidates[:limit]
-    print_info(f"Selected {len(to_delete)} messages for deletion")
+    print_info(f"Selected {len(to_delete)} of {len(candidates)} messages for deletion")
 
     if dry_run:
         print_warning("DRY RUN - No messages will be deleted")

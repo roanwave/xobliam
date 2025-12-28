@@ -117,7 +117,7 @@ def print_deletion_candidates(
     candidates: list[dict[str, Any]],
     limit: int = 20,
 ) -> None:
-    """Print deletion candidates table."""
+    """Print deletion candidates table (ungrouped, flat list)."""
     table = Table(title="Deletion Candidates")
     table.add_column("Score", justify="right", style="bold")
     table.add_column("Tier", style="dim")
@@ -147,6 +147,78 @@ def print_deletion_candidates(
         )
 
     console.print(table)
+    if len(candidates) > limit:
+        console.print(f"[dim]... and {len(candidates) - limit} more. Use --expand to see all.[/dim]")
+
+
+def print_deletion_candidates_grouped(candidates: list[dict[str, Any]]) -> None:
+    """Print deletion candidates grouped by sender in a tree view."""
+    from collections import defaultdict
+
+    if not candidates:
+        return
+
+    # Group by sender
+    by_sender: dict[str, list[dict]] = defaultdict(list)
+    for c in candidates:
+        sender = c.get("sender", "unknown")
+        by_sender[sender].append(c)
+
+    # Sort senders by count (most emails first)
+    sorted_senders = sorted(by_sender.items(), key=lambda x: len(x[1]), reverse=True)
+
+    # Group by tier for header
+    tier_counts: dict[str, int] = defaultdict(int)
+    for c in candidates:
+        tier_name = c.get("tier", {}).get("name", "keep")
+        tier_counts[tier_name] += 1
+
+    # Print tier summary header
+    console.print()
+    if tier_counts.get("very_safe", 0) > 0:
+        console.print(f"[bold green]Very Safe (90-100):[/bold green] {tier_counts['very_safe']} emails")
+    if tier_counts.get("likely_safe", 0) > 0:
+        console.print(f"[bold yellow]Likely Safe (70-89):[/bold yellow] {tier_counts['likely_safe']} emails")
+    if tier_counts.get("review", 0) > 0:
+        console.print(f"[bold orange1]Review (50-69):[/bold orange1] {tier_counts['review']} emails")
+    console.print()
+
+    # Print tree view
+    total_senders = len(sorted_senders)
+    for idx, (sender, sender_candidates) in enumerate(sorted_senders):
+        is_last = idx == total_senders - 1
+        prefix = "└─" if is_last else "├─"
+        child_prefix = "   " if is_last else "│  "
+
+        # Get avg score for color
+        avg_score = sum(c.get("score", 0) for c in sender_candidates) / len(sender_candidates)
+        if avg_score >= 90:
+            score_style = "green"
+        elif avg_score >= 70:
+            score_style = "yellow"
+        else:
+            score_style = "orange1"
+
+        # Sender line
+        console.print(
+            f"{prefix} [{score_style}]{sender}[/{score_style}] "
+            f"([bold]{len(sender_candidates)}[/bold] emails, avg score: {avg_score:.0f})"
+        )
+
+        # Sample subjects (up to 3)
+        subjects = []
+        for c in sender_candidates[:3]:
+            subj = (c.get("subject", "") or "(no subject)")[:35]
+            subjects.append(f'"{subj}"')
+
+        subject_line = ", ".join(subjects)
+        if len(sender_candidates) > 3:
+            subject_line += f", ... +{len(sender_candidates) - 3} more"
+
+        console.print(f"{child_prefix}└─ [dim]{subject_line}[/dim]")
+
+    console.print()
+    console.print(f"[bold]Total:[/bold] {len(candidates)} emails from {total_senders} senders")
 
 
 def print_deletion_summary(summary: dict[str, Any]) -> None:
