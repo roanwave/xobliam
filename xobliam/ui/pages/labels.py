@@ -24,7 +24,7 @@ from xobliam.fetcher import (
     get_label_id_by_name,
     merge_labels,
 )
-from xobliam.smart_delete.filters import filter_unlabeled_messages
+from xobliam.smart_delete import filter_unlabeled_messages
 
 
 def render():
