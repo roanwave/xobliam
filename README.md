@@ -8,6 +8,11 @@ Gmail analytics dashboard with intelligent cleanup recommendations. Analyze 90 d
 
 **Windows:** Double-click `run_xobliam.bat` to launch the dashboard.
 
+Or create a desktop shortcut with custom icon:
+```powershell
+powershell -ExecutionPolicy Bypass -File create_shortcut.ps1
+```
+
 The first time you run xobliam, a setup wizard will guide you through:
 1. Google OAuth authentication
 2. Initial email data fetch
@@ -16,16 +21,55 @@ After setup, just double-click the launcher anytime to open your dashboard.
 
 ## Features
 
-### Streamlit Dashboard
+### Dashboard
 
 The web-based dashboard provides six main pages:
 
-- **Dashboard** - Summary stats, email health indicators, recent activity
-- **Analytics** - Time heatmaps, volume charts, top senders analysis
-- **Labels** - Label optimization with coherence scoring, redundancy detection, engagement analysis
+- **Dashboard** - Summary stats, email health, upcoming dates & deadlines
+- **Analytics** - Time heatmaps, volume charts, per-day hourly breakdown
+- **Labels** - Label optimization, sender breakdown, merge execution, smart suggestions
 - **Taxonomy** - Automatic email classification by category
 - **Smart Delete** - AI-powered safety scoring for cleanup recommendations
 - **Settings** - Account management, data refresh, export, cache controls
+
+### v1.2 Features
+
+**Date/Deadline Extractor**
+- Scans unlabeled emails for upcoming dates (sales, expirations, events, appointments)
+- Extracts promo codes found near dates
+- Smart year inference using email sent date as context
+- Shows on Dashboard in "Upcoming Dates & Deadlines" section
+
+**Smart Label Suggester**
+- Analyzes labeled emails to build sender/keyword profiles
+- Suggests existing labels for unlabeled emails based on similarity
+- Apply suggestions individually or bulk apply all at once
+- Labels page > Suggestions tab
+
+### v1.1 Features
+
+**Label Manager (Smart Labeling)**
+- Create new Gmail labels directly from the UI
+- Find unlabeled emails by sender pattern (partial match)
+- Preview and select which senders to include
+- Bulk-apply labels with progress tracking
+- **Gmail filter creation**: Auto-label future emails from selected senders
+- Labels page > Label Manager tab
+
+**Label Sender Breakdown**
+- See which senders are under each label
+- Ranked by volume with read rate per sender
+- Labels page > Label Details tab
+
+**Label Merge Execution**
+- Merge redundant labels via Gmail API
+- Choose merge direction, optionally delete source label
+- Labels page > Overlap & Merge tab
+
+**Per-Day Hourly Breakdown**
+- Hourly email distribution for each day of the week
+- "Focus Mode" suggestions identifying low-traffic periods
+- Analytics page > Day Breakdown tab
 
 ### Analytics Capabilities
 
@@ -45,6 +89,7 @@ Advanced label analysis includes:
 - **Engagement Efficiency** - Compare each label's read rate to inbox average
 - **Overlap Detection** - Find redundant label pairs with high co-occurrence
 - **Abandoned Detection** - Identify labels with zero messages
+- **Smart Suggestions** - Suggest labels for unlabeled emails based on patterns
 - **Actionable Recommendations** - Prioritized suggestions (MERGE, FIX, REVIEW, CLEANUP)
 
 ### Smart Delete
@@ -106,20 +151,22 @@ Double-click run_xobliam.bat
 streamlit run xobliam/app.py
 ```
 
-## CLI (Optional)
+## CLI
 
 A CLI is also available for scripting and automation:
 
 ```bash
-xobliam ui              # Launch Streamlit dashboard
-xobliam auth            # Authenticate with Gmail
-xobliam fetch           # Fetch/refresh email data
-xobliam stats           # Quick statistics
-xobliam labels          # Label analysis
-xobliam taxonomy        # Email category breakdown
-xobliam export          # Export analytics to JSON
-xobliam delete          # Smart delete (dry run by default)
-xobliam clear           # Clear cached data
+xobliam ui                      # Launch Streamlit dashboard
+xobliam auth                    # Authenticate with Gmail
+xobliam fetch                   # Fetch/refresh email data
+xobliam stats                   # Quick statistics
+xobliam stats --day Friday      # Hourly breakdown for a specific day
+xobliam labels                  # Label analysis
+xobliam labels --label "Name"   # Sender breakdown for specific label
+xobliam taxonomy                # Email category breakdown
+xobliam export                  # Export analytics to JSON
+xobliam delete                  # Smart delete (dry run by default)
+xobliam clear                   # Clear cached data
 ```
 
 ## Email Categories
@@ -155,23 +202,21 @@ ANALYSIS_DAYS=90
 
 ```
 xobliam/
-├── run_xobliam.bat     # Windows launcher
+├── run_xobliam.bat      # Windows launcher
+├── create_shortcut.ps1  # Desktop shortcut creator
+├── xobliam.png          # App icon
 ├── xobliam/
-│   ├── app.py          # Streamlit entrypoint
-│   ├── main.py         # CLI entrypoint
-│   ├── auth/           # OAuth and credentials
-│   ├── fetcher/        # Gmail API + SQLite caching
-│   ├── analytics/      # Analysis modules
-│   ├── taxonomy/       # Email classification
-│   ├── smart_delete/   # Deletion scoring
-│   └── ui/             # CLI and Streamlit pages
-├── tests/              # Test suite
-└── data/               # Cache (gitignored)
+│   ├── app.py           # Streamlit entrypoint
+│   ├── main.py          # CLI entrypoint
+│   ├── auth/            # OAuth and credentials
+│   ├── fetcher/         # Gmail API + SQLite caching
+│   ├── analytics/       # Analysis modules
+│   ├── taxonomy/        # Email classification
+│   ├── smart_delete/    # Deletion scoring
+│   └── ui/              # CLI and Streamlit pages
+├── tests/               # Test suite
+└── data/                # Cache (gitignored)
 ```
-
-## Screenshots
-
-*Coming soon*
 
 ## Security Notes
 
