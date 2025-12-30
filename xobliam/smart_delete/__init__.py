@@ -7,12 +7,14 @@ from .candidate_finder import (
     get_deletion_summary,
     get_safety_tier,
 )
+from .exception_detector import detect_exceptions
 from .executor import delete_messages
 from .safety_scorer import calculate_safety_score, get_score_breakdown
 
 __all__ = [
     "calculate_safety_score",
     "delete_messages",
+    "detect_exceptions",
     "filter_unlabeled_messages",
     "find_deletion_candidates",
     "get_bulk_delete_recommendations",

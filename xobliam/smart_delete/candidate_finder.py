@@ -94,6 +94,7 @@ def find_deletion_candidates(
     user_context: dict[str, Any] | None = None,
     min_score: int = 50,
     include_breakdown: bool = False,
+    exclude_exceptions: bool = False,
 ) -> list[dict[str, Any]]:
     """
     Find messages that are candidates for deletion.
@@ -106,6 +107,7 @@ def find_deletion_candidates(
         user_context: User context for scoring.
         min_score: Minimum safety score to include.
         include_breakdown: Whether to include score breakdown.
+        exclude_exceptions: If True, exclude messages with detected exceptions.
 
     Returns:
         List of candidates sorted by score (highest first).
@@ -116,7 +118,12 @@ def find_deletion_candidates(
     candidates = []
 
     for msg in unlabeled:
-        score = calculate_safety_score(msg, user_context)
+        score_result = calculate_safety_score(msg, user_context)
+        score = score_result["score"]
+
+        # Skip messages with exceptions if requested
+        if exclude_exceptions and score_result.get("has_exceptions"):
+            continue
 
         if score >= min_score:
             candidate = {
@@ -125,11 +132,14 @@ def find_deletion_candidates(
                 "sender": msg.get("sender"),
                 "subject": msg.get("subject"),
                 "date": msg.get("date"),
+                "snippet": msg.get("snippet"),
                 "score": score,
                 "tier": get_safety_tier(score),
                 "is_unread": msg.get("is_unread", False),
                 "has_attachments": msg.get("has_attachments", False),
                 "labels": msg.get("labels", []),
+                "exceptions": score_result.get("exceptions", []),
+                "has_exceptions": score_result.get("has_exceptions", False),
             }
 
             if include_breakdown:
@@ -192,11 +202,16 @@ def get_deletion_summary(
     unlabeled = filter_unlabeled_messages(messages)
 
     tier_counts = {tier: 0 for tier in SAFETY_TIERS}
+    exceptions_count = 0
 
     for msg in unlabeled:
-        score = calculate_safety_score(msg, user_context)
+        score_result = calculate_safety_score(msg, user_context)
+        score = score_result["score"]
         tier = get_safety_tier(score)
         tier_counts[tier["name"]] += 1
+
+        if score_result.get("has_exceptions"):
+            exceptions_count += 1
 
     return {
         "total_messages": len(messages),
@@ -205,6 +220,7 @@ def get_deletion_summary(
         "deletable": tier_counts.get("very_safe", 0) + tier_counts.get("likely_safe", 0),
         "needs_review": tier_counts.get("review", 0),
         "keep": tier_counts.get("keep", 0),
+        "exceptions_count": exceptions_count,
     }
 
 
@@ -263,7 +279,8 @@ def get_bulk_delete_recommendations(
 
     for msg in unlabeled:
         sender = msg.get("sender", "")
-        score = calculate_safety_score(msg, user_context)
+        score_result = calculate_safety_score(msg, user_context)
+        score = score_result["score"]
         if sender not in sender_scores:
             sender_scores[sender] = []
         sender_scores[sender].append(score)

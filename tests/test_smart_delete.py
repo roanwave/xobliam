@@ -28,8 +28,10 @@ class TestSafetyScorer:
         }
 
         # Without any positive or negative signals, score should be around base
-        score = calculate_safety_score(message)
-        assert 40 <= score <= 60
+        result = calculate_safety_score(message)
+        assert isinstance(result, dict)
+        assert "score" in result
+        assert 40 <= result["score"] <= 60
 
     def test_unsubscribe_increases_score(self):
         """Test that unsubscribe link increases score."""
@@ -43,9 +45,9 @@ class TestSafetyScorer:
             "date": datetime.utcnow().isoformat(),
         }
 
-        score = calculate_safety_score(message)
+        result = calculate_safety_score(message)
         # Should be higher than base due to unsubscribe signal
-        assert score > 50
+        assert result["score"] > 50
 
     def test_unread_increases_score(self):
         """Test that unread status increases score."""
@@ -64,10 +66,10 @@ class TestSafetyScorer:
             "is_unread": True,
         }
 
-        read_score = calculate_safety_score(read_message)
-        unread_score = calculate_safety_score(unread_message)
+        read_result = calculate_safety_score(read_message)
+        unread_result = calculate_safety_score(unread_message)
 
-        assert unread_score > read_score
+        assert unread_result["score"] > read_result["score"]
 
     def test_attachments_decrease_score(self):
         """Test that attachments decrease score."""
@@ -86,10 +88,10 @@ class TestSafetyScorer:
             "has_attachments": True,
         }
 
-        no_attach_score = calculate_safety_score(no_attach)
-        with_attach_score = calculate_safety_score(with_attach)
+        no_attach_result = calculate_safety_score(no_attach)
+        with_attach_result = calculate_safety_score(with_attach)
 
-        assert with_attach_score < no_attach_score
+        assert with_attach_result["score"] < no_attach_result["score"]
 
     def test_starred_decreases_score(self):
         """Test that starred/important decreases score."""
@@ -108,10 +110,10 @@ class TestSafetyScorer:
             "labels": ["INBOX", "STARRED"],
         }
 
-        normal_score = calculate_safety_score(normal)
-        starred_score = calculate_safety_score(starred)
+        normal_result = calculate_safety_score(normal)
+        starred_result = calculate_safety_score(starred)
 
-        assert starred_score < normal_score
+        assert starred_result["score"] < normal_result["score"]
 
     def test_recent_message_decreases_score(self):
         """Test that recent messages have lower score."""
@@ -130,10 +132,10 @@ class TestSafetyScorer:
             "date": (datetime.utcnow() - timedelta(days=60)).isoformat(),
         }
 
-        recent_score = calculate_safety_score(recent)
-        old_score = calculate_safety_score(old)
+        recent_result = calculate_safety_score(recent)
+        old_result = calculate_safety_score(old)
 
-        assert old_score > recent_score
+        assert old_result["score"] > recent_result["score"]
 
     def test_user_context_domain(self):
         """Test that user domain affects score."""
@@ -148,15 +150,15 @@ class TestSafetyScorer:
         }
 
         # Without user domain context
-        score_no_context = calculate_safety_score(message, {})
+        result_no_context = calculate_safety_score(message, {})
 
         # With user domain (same as sender)
-        score_with_context = calculate_safety_score(
+        result_with_context = calculate_safety_score(
             message, {"user_domain": "mycompany.com"}
         )
 
         # Score should be lower when sender is from user's domain
-        assert score_with_context < score_no_context
+        assert result_with_context["score"] < result_no_context["score"]
 
     def test_score_clamped_to_0_100(self):
         """Test that score is always between 0 and 100."""
@@ -183,8 +185,8 @@ class TestSafetyScorer:
             "thread_id": "thread123",
         }
 
-        safe_score = calculate_safety_score(very_safe)
-        risky_score = calculate_safety_score(
+        safe_result = calculate_safety_score(very_safe)
+        risky_result = calculate_safety_score(
             risky,
             {
                 "user_domain": "mycompany.com",
@@ -192,8 +194,8 @@ class TestSafetyScorer:
             },
         )
 
-        assert 0 <= safe_score <= 100
-        assert 0 <= risky_score <= 100
+        assert 0 <= safe_result["score"] <= 100
+        assert 0 <= risky_result["score"] <= 100
 
 
 class TestScoreBreakdown:

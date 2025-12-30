@@ -169,9 +169,12 @@ def print_deletion_candidates_grouped(candidates: list[dict[str, Any]]) -> None:
 
     # Group by tier for header
     tier_counts: dict[str, int] = defaultdict(int)
+    exceptions_count = 0
     for c in candidates:
         tier_name = c.get("tier", {}).get("name", "keep")
         tier_counts[tier_name] += 1
+        if c.get("has_exceptions"):
+            exceptions_count += 1
 
     # Print tier summary header
     console.print()
@@ -181,6 +184,8 @@ def print_deletion_candidates_grouped(candidates: list[dict[str, Any]]) -> None:
         console.print(f"[bold yellow]Likely Safe (70-89):[/bold yellow] {tier_counts['likely_safe']} emails")
     if tier_counts.get("review", 0) > 0:
         console.print(f"[bold orange1]Review (50-69):[/bold orange1] {tier_counts['review']} emails")
+    if exceptions_count > 0:
+        console.print(f"[bold magenta]With Exceptions:[/bold magenta] {exceptions_count} emails")
     console.print()
 
     # Print tree view
@@ -199,10 +204,14 @@ def print_deletion_candidates_grouped(candidates: list[dict[str, Any]]) -> None:
         else:
             score_style = "orange1"
 
+        # Count exceptions for this sender
+        sender_exceptions = sum(1 for c in sender_candidates if c.get("has_exceptions"))
+        exception_indicator = f" [magenta]⚠ {sender_exceptions} exc[/magenta]" if sender_exceptions > 0 else ""
+
         # Sender line
         console.print(
             f"{prefix} [{score_style}]{sender}[/{score_style}] "
-            f"([bold]{len(sender_candidates)}[/bold] emails, avg score: {avg_score:.0f})"
+            f"([bold]{len(sender_candidates)}[/bold] emails, avg score: {avg_score:.0f}){exception_indicator}"
         )
 
         # Sample subjects (up to 3)
@@ -226,6 +235,7 @@ def print_deletion_summary(summary: dict[str, Any]) -> None:
     tier_counts = summary.get("tier_counts", {})
     unlabeled_count = summary.get("unlabeled_count", 0)
     total_messages = summary.get("total_messages", 0)
+    exceptions_count = summary.get("exceptions_count", 0)
 
     # Show unlabeled filter info
     console.print(
@@ -244,6 +254,12 @@ def print_deletion_summary(summary: dict[str, Any]) -> None:
 
     console.print(table)
     console.print(f"\nTotal deletable: [green]{summary.get('deletable', 0)}[/green]")
+
+    if exceptions_count > 0:
+        console.print(
+            f"[magenta]⚠ {exceptions_count} emails[/magenta] have detected exceptions "
+            "(orders, financials, appointments, etc.)"
+        )
 
 
 def print_label_stats(stats: dict[str, Any], show_system: bool = False) -> None:

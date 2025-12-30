@@ -2,6 +2,33 @@
 
 All notable changes to xobliam will be documented in this file.
 
+## [1.3.0] - 2024-12-30
+
+### Added
+
+**Smart Delete Exception Detection**
+- Scans email content for patterns that indicate importance (orders, financials, appointments, travel, security, legal)
+- Detected exceptions reduce safety scores automatically
+- Hard floor: emails with significant exceptions (severity >= 30) capped at score 50
+- Exception types detected:
+  - Order/Shipping: order numbers, tracking numbers (UPS, USPS, FedEx), shipping keywords
+  - Financial: dollar amounts >$100, account numbers, payment/statement keywords, bill due dates
+  - Appointments/Reservations: keywords, confirmation codes, time patterns
+  - Travel: flight/hotel keywords, airport codes, reservation numbers
+  - Security: password reset, verification codes, security alerts
+  - Legal/Important: terms of service, action required, deadlines
+- New "Exceptions" tab in Smart Delete page
+  - View emails grouped by exception type or sender
+  - Exception type summary with counts
+  - Option to delete anyway after review
+- CLI grouped display shows exception indicators per sender
+- Summary shows total count of emails with exceptions
+
+### Changed
+- Smart Delete page now has 4 tabs (added Exceptions)
+- `calculate_safety_score()` returns dict with score, exceptions, and exception metadata
+- Deletion candidates include `has_exceptions` and `exceptions` fields
+
 ## [1.2.0] - 2024-12-28
 
 ### Added

@@ -6,11 +6,14 @@ from typing import Any
 
 from xobliam.taxonomy import classify_message
 
+from .exception_detector import detect_exceptions
+
 
 def calculate_safety_score(
     message: dict[str, Any],
     user_context: dict[str, Any] | None = None,
-) -> int:
+    include_exceptions: bool = True,
+) -> dict[str, Any]:
     """
     Calculate a safety score for deleting a message.
 
@@ -23,9 +26,13 @@ def calculate_safety_score(
             - deleted_senders: Set of senders previously deleted
             - replied_threads: Set of thread IDs user replied to
             - high_engagement_senders: Set of senders user engages with
+        include_exceptions: Whether to scan for content exceptions.
 
     Returns:
-        Safety score from 0 to 100.
+        Dictionary with:
+            - score: Safety score from 0 to 100
+            - exceptions: List of detected exceptions (if any)
+            - has_exceptions: Boolean indicating if exceptions were found
     """
     if user_context is None:
         user_context = {}
@@ -82,8 +89,29 @@ def calculate_safety_score(
     if _thread_message_count(message, user_context) > 1:
         score -= 5
 
+    # Check for content exceptions
+    exceptions_result = {"has_exceptions": False, "exceptions": [], "exception_score": 0}
+
+    if include_exceptions:
+        exceptions_result = detect_exceptions(message, user_context)
+
+        if exceptions_result["has_exceptions"]:
+            # Reduce score based on exception severity
+            score -= exceptions_result["exception_score"]
+
+            # Hard floor: Never score above 50 if significant exceptions detected
+            if exceptions_result["exception_score"] >= 30:
+                score = min(score, 50)
+
     # Clamp to 0-100 range
-    return max(0, min(100, score))
+    final_score = max(0, min(100, score))
+
+    return {
+        "score": final_score,
+        "exceptions": exceptions_result.get("exceptions", []),
+        "has_exceptions": exceptions_result.get("has_exceptions", False),
+        "exception_score": exceptions_result.get("exception_score", 0),
+    }
 
 
 def _has_unsubscribe_link(message: dict[str, Any]) -> bool:
@@ -297,12 +325,23 @@ def get_score_breakdown(
     if _thread_message_count(message, user_context) > 1:
         factors.append({"factor": "Part of thread", "impact": -5})
 
-    total_score = calculate_safety_score(message, user_context)
+    # Get full score with exceptions
+    score_result = calculate_safety_score(message, user_context)
+
+    # Add exception factors
+    if score_result.get("has_exceptions"):
+        for exc in score_result.get("exceptions", []):
+            factors.append({
+                "factor": f"Exception: {exc['type']} - {exc['detail']}",
+                "impact": -exc["severity"],
+            })
 
     return {
-        "score": total_score,
+        "score": score_result["score"],
         "factors": factors,
         "message_id": message.get("message_id"),
         "sender": message.get("sender"),
         "subject": message.get("subject"),
+        "exceptions": score_result.get("exceptions", []),
+        "has_exceptions": score_result.get("has_exceptions", False),
     }

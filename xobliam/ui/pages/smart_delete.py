@@ -70,10 +70,19 @@ def render():
             help="Score <50: Keep these emails",
         )
 
+    # Show exceptions count
+    exceptions_count = summary.get("exceptions_count", 0)
+    if exceptions_count > 0:
+        st.warning(
+            f"⚠️ **{exceptions_count} emails** with detected exceptions "
+            "(orders, financials, appointments, etc.) have reduced scores. "
+            "Review in the Exceptions tab."
+        )
+
     st.divider()
 
     # Tabs
-    tab1, tab2, tab3 = st.tabs(["Candidates", "Bulk Delete", "Execute"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Candidates", "Bulk Delete", "Exceptions", "Execute"])
 
     with tab1:
         render_candidates(messages)
@@ -82,6 +91,9 @@ def render():
         render_bulk_recommendations(messages)
 
     with tab3:
+        render_exceptions(messages)
+
+    with tab4:
         render_execution(messages, cache)
 
 
@@ -416,3 +428,191 @@ def render_execution(messages: list, cache: MessageCache):
 
             # Suggest refresh
             st.info("Click 'Refresh Data' in the sidebar to update the cache.")
+
+
+def render_exceptions(messages: list):
+    """Render emails with detected exceptions."""
+    from collections import defaultdict
+
+    st.subheader("Emails with Exceptions")
+    st.caption(
+        "These emails have content patterns (orders, financials, appointments, etc.) "
+        "that suggest they may be important. Review before deleting."
+    )
+
+    # Get all candidates including those with exceptions
+    candidates = find_deletion_candidates(messages, min_score=0, include_breakdown=True)
+
+    # Filter to only those with exceptions
+    with_exceptions = [c for c in candidates if c.get("has_exceptions")]
+
+    if not with_exceptions:
+        st.success("No emails with detected exceptions.")
+        return
+
+    st.write(f"Found **{len(with_exceptions)}** emails with exceptions")
+
+    # Group by exception type
+    by_type: dict[str, list[dict]] = defaultdict(list)
+    for c in with_exceptions:
+        for exc in c.get("exceptions", []):
+            exc_type = exc.get("type", "unknown")
+            by_type[exc_type].append({
+                **c,
+                "exception_detail": exc.get("detail", ""),
+                "exception_severity": exc.get("severity", 0),
+            })
+
+    # Exception type summary
+    st.subheader("Exception Types")
+
+    # Create columns for type summary
+    exception_types = sorted(by_type.keys())
+    cols = st.columns(min(4, len(exception_types)))
+
+    type_labels = {
+        "order_number": "📦 Orders",
+        "tracking_number": "🚚 Tracking",
+        "shipping": "📬 Shipping",
+        "financial_amount": "💰 Financial",
+        "account_number": "🏦 Accounts",
+        "bill_due": "📅 Bills Due",
+        "financial": "💳 Financial",
+        "appointment": "📆 Appointments",
+        "reservation": "🎫 Reservations",
+        "flight": "✈️ Flights",
+        "travel": "🧳 Travel",
+        "security": "🔒 Security",
+        "legal_important": "⚠️ Legal/Important",
+        "has_attachments": "📎 Attachments",
+        "replied_sender": "↩️ Replied To",
+        "important_name": "👤 Important Name",
+    }
+
+    for idx, exc_type in enumerate(exception_types):
+        col_idx = idx % 4
+        with cols[col_idx]:
+            label = type_labels.get(exc_type, exc_type.replace("_", " ").title())
+            unique_emails = len(set(c["message_id"] for c in by_type[exc_type]))
+            st.metric(label, unique_emails)
+
+    st.divider()
+
+    # Show emails by type with expanders
+    view_mode = st.selectbox(
+        "View by",
+        ["Exception Type", "Sender", "All Emails"],
+        key="exceptions_view",
+    )
+
+    if view_mode == "Exception Type":
+        for exc_type in exception_types:
+            type_emails = by_type[exc_type]
+            unique_emails = {c["message_id"]: c for c in type_emails}.values()
+            label = type_labels.get(exc_type, exc_type.replace("_", " ").title())
+
+            with st.expander(f"{label} ({len(unique_emails)} emails)"):
+                for email in list(unique_emails)[:20]:
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.write(f"**{email.get('sender', '')[:40]}**")
+                        st.write(f"_{(email.get('subject', '') or '(no subject)')[:60]}_")
+                        st.caption(
+                            f"Exception: {email.get('exception_detail', '')} "
+                            f"| Score: {email.get('score', 0)}"
+                        )
+                    with col2:
+                        st.write(f"Score: **{email.get('score', 0)}**")
+                    st.divider()
+
+    elif view_mode == "Sender":
+        by_sender: dict[str, list[dict]] = defaultdict(list)
+        for c in with_exceptions:
+            sender = c.get("sender", "unknown")
+            by_sender[sender].append(c)
+
+        sorted_senders = sorted(by_sender.items(), key=lambda x: len(x[1]), reverse=True)
+
+        for sender, sender_emails in sorted_senders[:30]:
+            # Collect all exception types for this sender
+            exc_types_for_sender = set()
+            for e in sender_emails:
+                for exc in e.get("exceptions", []):
+                    exc_types_for_sender.add(exc.get("type", ""))
+
+            exc_icons = " ".join(
+                type_labels.get(t, "").split()[0]
+                for t in exc_types_for_sender
+                if t in type_labels
+            )
+
+            with st.expander(f"{exc_icons} **{sender}** ({len(sender_emails)} emails)"):
+                for email in sender_emails[:10]:
+                    exceptions_str = ", ".join(
+                        exc.get("detail", "") for exc in email.get("exceptions", [])
+                    )
+                    st.write(f"• _{(email.get('subject', '') or '(no subject)')[:50]}_")
+                    st.caption(f"Exceptions: {exceptions_str} | Score: {email.get('score', 0)}")
+
+    else:  # All Emails
+        df_data = []
+        for c in with_exceptions[:100]:
+            exceptions_str = ", ".join(
+                exc.get("detail", "") for exc in c.get("exceptions", [])
+            )
+            df_data.append({
+                "Score": c["score"],
+                "From": c.get("sender", "")[:30],
+                "Subject": (c.get("subject", "") or "")[:40],
+                "Exceptions": exceptions_str[:50],
+            })
+
+        df = pd.DataFrame(df_data)
+        st.dataframe(df, width="stretch", hide_index=True, height=400)
+
+    st.divider()
+
+    # Option to delete anyway
+    st.subheader("Delete Anyway")
+    st.warning(
+        "⚠️ These emails have detected exceptions. Only delete if you've reviewed "
+        "them and are sure you don't need them."
+    )
+
+    min_score = st.slider(
+        "Minimum score for deletion",
+        0, 100, 50,
+        key="exceptions_min_score",
+        help="Only delete exception emails above this score threshold",
+    )
+
+    deletable = [c for c in with_exceptions if c["score"] >= min_score]
+
+    if not deletable:
+        st.info(f"No exception emails with score >= {min_score}")
+        return
+
+    st.write(f"**{len(deletable)}** emails can be deleted (score >= {min_score})")
+
+    # Confirmation
+    confirm = st.checkbox(
+        "I have reviewed these emails and confirm deletion",
+        key="exceptions_confirm",
+    )
+
+    if st.button(
+        "Delete Exception Emails",
+        disabled=not confirm,
+        type="primary",
+        key="delete_exceptions_btn",
+    ):
+        message_ids = [c["message_id"] for c in deletable]
+        cache = MessageCache()
+
+        with st.spinner("Deleting..."):
+            result = delete_messages(message_ids, cache=cache, dry_run=False)
+
+        if result["success"]:
+            st.success(f"Deleted {result['deleted']} emails")
+        else:
+            st.warning(f"Deleted {result['deleted']}, failed {result['failed']}")
