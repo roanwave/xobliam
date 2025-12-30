@@ -12,6 +12,7 @@ All notable changes to xobliam will be documented in this file.
 - Shows dates on Dashboard in "Upcoming Dates & Deadlines" section
 - Supports patterns: MM/DD, "Month DD", "through X", "expires X", "by X"
 - Context extraction showing why the date matters
+- Smart year inference using email sent date as context
 
 **Smart Label Suggester**
 - New "Suggestions" tab in Labels page
@@ -20,6 +21,13 @@ All notable changes to xobliam will be documented in this file.
 - Scoring system: sender email match (40pts), domain match (25pts), keyword overlap (20pts)
 - Apply suggestions individually or bulk apply all at once
 - Select/deselect senders with checkboxes before applying
+
+**Gmail Filter Management**
+- Auto-archive option when creating filters (skip inbox)
+- "Manage Gmail Filters" section in Label Manager tab
+- View all Gmail filters with criteria and actions
+- Delete filters directly from the UI
+- Label name resolution for filter actions display
 
 ### Changed
 - Labels page now has 8 tabs (added Suggestions)

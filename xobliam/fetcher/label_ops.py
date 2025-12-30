@@ -290,6 +290,7 @@ def apply_label_to_messages(
 def create_filter_for_senders(
     senders: list[str],
     label_id: str,
+    auto_archive: bool = False,
     service: Resource | None = None,
 ) -> dict[str, Any]:
     """
@@ -298,6 +299,7 @@ def create_filter_for_senders(
     Args:
         senders: List of sender email addresses.
         label_id: ID of the label to apply.
+        auto_archive: If True, also remove from inbox (skip inbox).
         service: Gmail API service.
 
     Returns:
@@ -312,10 +314,6 @@ def create_filter_for_senders(
             "error": "No senders provided",
         }
 
-    # Build filter criteria: from:sender1 OR from:sender2 OR ...
-    # Gmail filter uses "from:" query syntax
-    from_queries = [f"from:{sender}" for sender in senders]
-
     # Gmail has a limit on filter criteria length, so we may need to chunk
     # For now, handle up to ~50 senders which should be under the limit
     if len(senders) > 50:
@@ -323,8 +321,6 @@ def create_filter_for_senders(
             "success": False,
             "error": f"Too many senders ({len(senders)}). Maximum 50 senders per filter.",
         }
-
-    filter_criteria = " OR ".join(from_queries)
 
     # Build the filter body
     filter_body = {
@@ -335,6 +331,10 @@ def create_filter_for_senders(
             "addLabelIds": [label_id],
         },
     }
+
+    # Add auto-archive action if requested
+    if auto_archive:
+        filter_body["action"]["removeLabelIds"] = ["INBOX"]
 
     try:
         result = (
@@ -348,6 +348,7 @@ def create_filter_for_senders(
             "success": True,
             "filter_id": result.get("id"),
             "senders_count": len(senders),
+            "auto_archive": auto_archive,
         }
     except HttpError as e:
         error_msg = str(e)
@@ -360,3 +361,134 @@ def create_filter_for_senders(
             "success": False,
             "error": error_msg,
         }
+
+
+def list_filters(
+    service: Resource | None = None,
+) -> dict[str, Any]:
+    """
+    List all Gmail filters.
+
+    Args:
+        service: Gmail API service.
+
+    Returns:
+        Dictionary with list of filters or error.
+    """
+    if service is None:
+        service = get_gmail_service()
+
+    try:
+        result = service.users().settings().filters().list(userId="me").execute()
+        filters = result.get("filter", [])
+
+        # Parse filters into a more usable format
+        parsed_filters = []
+        for f in filters:
+            criteria = f.get("criteria", {})
+            action = f.get("action", {})
+
+            parsed_filters.append({
+                "filter_id": f.get("id"),
+                "from": criteria.get("from", ""),
+                "to": criteria.get("to", ""),
+                "subject": criteria.get("subject", ""),
+                "has_attachment": criteria.get("hasAttachment", False),
+                "add_labels": action.get("addLabelIds", []),
+                "remove_labels": action.get("removeLabelIds", []),
+                "forward": action.get("forward", ""),
+            })
+
+        return {
+            "success": True,
+            "filters": parsed_filters,
+            "count": len(parsed_filters),
+        }
+    except HttpError as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "filters": [],
+        }
+
+
+def delete_filter(
+    filter_id: str,
+    service: Resource | None = None,
+) -> dict[str, Any]:
+    """
+    Delete a Gmail filter.
+
+    Args:
+        filter_id: ID of the filter to delete.
+        service: Gmail API service.
+
+    Returns:
+        Dictionary with delete results.
+    """
+    if service is None:
+        service = get_gmail_service()
+
+    try:
+        service.users().settings().filters().delete(userId="me", id=filter_id).execute()
+        return {"success": True, "filter_id": filter_id}
+    except HttpError as e:
+        return {"success": False, "error": str(e)}
+
+
+def get_label_name_by_id(
+    label_id: str,
+    service: Resource | None = None,
+    cache: MessageCache | None = None,
+) -> str | None:
+    """
+    Get a label name by its ID.
+
+    Args:
+        label_id: The label ID to look up.
+        service: Gmail API service.
+        cache: Message cache instance.
+
+    Returns:
+        Label name or None if not found.
+    """
+    # System labels
+    system_labels = {
+        "INBOX": "Inbox",
+        "SENT": "Sent",
+        "DRAFT": "Drafts",
+        "TRASH": "Trash",
+        "SPAM": "Spam",
+        "STARRED": "Starred",
+        "IMPORTANT": "Important",
+        "UNREAD": "Unread",
+        "CATEGORY_PERSONAL": "Personal",
+        "CATEGORY_SOCIAL": "Social",
+        "CATEGORY_PROMOTIONS": "Promotions",
+        "CATEGORY_UPDATES": "Updates",
+        "CATEGORY_FORUMS": "Forums",
+    }
+
+    if label_id in system_labels:
+        return system_labels[label_id]
+
+    if cache is None:
+        cache = MessageCache()
+
+    # Try cache first
+    cached_labels = cache.get_cached_labels()
+    for label in cached_labels:
+        if label.get("label_id") == label_id:
+            return label.get("name")
+
+    # Fall back to API
+    if service is None:
+        service = get_gmail_service()
+
+    try:
+        result = service.users().labels().get(userId="me", id=label_id).execute()
+        return result.get("name")
+    except HttpError:
+        pass
+
+    return label_id  # Return ID if name not found

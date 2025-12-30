@@ -23,7 +23,10 @@ from xobliam.fetcher import (
     apply_label_to_messages,
     create_filter_for_senders,
     create_label,
+    delete_filter,
     get_label_id_by_name,
+    get_label_name_by_id,
+    list_filters,
     merge_labels,
 )
 from xobliam.smart_delete import filter_unlabeled_messages
@@ -897,6 +900,16 @@ def render_label_manager(messages: list, cache: MessageCache):
                 help="Automatically label future emails from these senders",
             )
 
+            # Auto-archive option (only show if filter is checked)
+            auto_archive = False
+            if create_filter:
+                auto_archive = st.checkbox(
+                    "Skip inbox (auto-archive)",
+                    value=False,
+                    key="auto_archive_checkbox",
+                    help="Future emails will be labeled but not appear in inbox",
+                )
+
             if st.button(
                 f"Apply label '{label_name}' to {selected_emails} emails",
                 type="primary",
@@ -939,12 +952,14 @@ def render_label_manager(messages: list, cache: MessageCache):
                             filter_result = create_filter_for_senders(
                                 senders=selected_sender_emails,
                                 label_id=label_id,
+                                auto_archive=auto_archive,
                             )
 
                         if filter_result["success"]:
+                            archive_msg = " and archived" if auto_archive else ""
                             st.success(
                                 f"Created filter: Future emails from {filter_result['senders_count']} "
-                                f"senders will automatically be labeled '{label_name}'"
+                                f"senders will automatically be labeled '{label_name}'{archive_msg}"
                             )
                         else:
                             st.warning(
@@ -960,6 +975,72 @@ def render_label_manager(messages: list, cache: MessageCache):
                     st.error(f"Failed to apply label: {result.get('errors', 'Unknown error')}")
         else:
             st.info("Select at least one sender to apply the label.")
+
+    # Manage Filters section
+    st.divider()
+    st.subheader("Manage Gmail Filters")
+    st.caption("View and manage filters that auto-label incoming emails.")
+
+    if st.button("Load Filters", key="load_filters_btn"):
+        st.session_state.show_filters = True
+
+    if st.session_state.get("show_filters", False):
+        with st.spinner("Loading filters..."):
+            filters_result = list_filters()
+
+        if not filters_result["success"]:
+            st.error(f"Could not load filters: {filters_result.get('error', 'Unknown error')}")
+        elif filters_result["count"] == 0:
+            st.info("No Gmail filters found.")
+        else:
+            st.write(f"Found **{filters_result['count']} filters**")
+
+            for f in filters_result["filters"]:
+                filter_id = f["filter_id"]
+                from_criteria = f["from"] or "(no sender criteria)"
+
+                # Get label names for display
+                add_labels = []
+                for label_id in f["add_labels"]:
+                    label_name = get_label_name_by_id(label_id, cache=cache)
+                    add_labels.append(label_name or label_id)
+
+                remove_labels = []
+                for label_id in f["remove_labels"]:
+                    label_name = get_label_name_by_id(label_id, cache=cache)
+                    remove_labels.append(label_name or label_id)
+
+                # Build action description
+                actions = []
+                if add_labels:
+                    actions.append(f"Label: {', '.join(add_labels)}")
+                if remove_labels:
+                    actions.append(f"Remove: {', '.join(remove_labels)}")
+                if f["forward"]:
+                    actions.append(f"Forward to: {f['forward']}")
+
+                action_str = " | ".join(actions) if actions else "(no actions)"
+
+                # Truncate long from criteria for display
+                from_display = from_criteria[:60] + "..." if len(from_criteria) > 60 else from_criteria
+
+                col1, col2 = st.columns([5, 1])
+
+                with col1:
+                    with st.expander(f"From: {from_display}"):
+                        st.write(f"**Full criteria:** {from_criteria}")
+                        st.write(f"**Actions:** {action_str}")
+                        st.caption(f"Filter ID: {filter_id}")
+
+                with col2:
+                    if st.button("Delete", key=f"delete_filter_{filter_id}", type="secondary"):
+                        delete_result = delete_filter(filter_id)
+                        if delete_result["success"]:
+                            st.success("Filter deleted!")
+                            st.session_state.show_filters = False  # Trigger reload
+                            st.rerun()
+                        else:
+                            st.error(f"Failed: {delete_result.get('error', 'Unknown')}")
 
 
 def render_label_suggestions(messages: list, cache: MessageCache):
